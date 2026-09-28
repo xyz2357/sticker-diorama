@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>贴纸预览表</title>
+<style>
+  body { margin: 0; background: #efe6d6; font: 13px/1.4 "Microsoft YaHei", sans-serif; color: #4a3b32; }
+  #sheet { display: flex; flex-wrap: wrap; gap: 10px; padding: 14px; }
+  .cell { background: #f7f0e3; border: 1px dashed #d4c3a6; border-radius: 8px; padding: 6px; text-align: center; }
+  .cell canvas { display: block; }
+  .lbl { font-size: 12px; opacity: .8; }
+  .err { color: #c00; }
+</style>
+</head>
+<body>
+<div id="sheet"></div>
+<script src="js/art-core.js"></script>
+<script src="js/art-nature.js" onerror="console.warn('no art-nature.js')"></script>
+<script src="js/art-critters.js" onerror="console.warn('no art-critters.js')"></script>
+<script>
+// 用法：sheet.html            全部贴纸、全部预览变体
+//       sheet.html?only=tree,pine
+//       sheet.html?zoom=1.5    放大看细节
+const q = new URLSearchParams(location.search);
+const only = q.get('only') ? q.get('only').split(',') : null;
+const zoom = parseFloat(q.get('zoom') || '1');
+const sheet = document.getElementById('sheet');
+for (const id of Object.keys(ART.fns)) {
+  if (only && !only.includes(id)) continue;
+  for (const v of ART.previews[id]) {
+    const cell = document.createElement('div'); cell.className = 'cell';
+    try {
+      const b = ART.bake(id, JSON.parse(JSON.stringify(v)));
+      const cv = document.createElement('canvas');
+      const sc = zoom / 2 * 1.0; // 1 单位 = zoom px
+      cv.width = Math.ceil(b.w * sc) + 20; cv.height = Math.ceil(b.h * sc) + 20;
+      const k = cv.getContext('2d');
+      k.globalAlpha = 0.28; k.drawImage(b.shadow, 10 - b.shadowPad * sc + 3, 10 - b.shadowPad * sc + 5, b.shadow.width * sc, b.shadow.height * sc);
+      k.globalAlpha = 1; k.drawImage(b.img, 10, 10, b.w * sc, b.h * sc);
+      // 原点十字
+      const ox = 10 + b.ax * sc, oy = 10 + b.ay * sc;
+      k.strokeStyle = 'rgba(230,0,0,.8)'; k.lineWidth = 1;
+      k.beginPath(); k.moveTo(ox - 6, oy); k.lineTo(ox + 6, oy); k.moveTo(ox, oy - 6); k.lineTo(ox, oy + 6); k.stroke();
+      for (const L of b.lights) { k.strokeStyle = 'rgba(255,170,0,.9)'; k.beginPath(); k.arc(ox + L.x * zoom, oy + L.y * zoom, L.r * zoom, 0, 7); k.stroke(); }
+      for (const E of b.emitters) { k.fillStyle = 'rgba(0,120,255,.9)'; k.beginPath(); k.arc(ox + E.x * zoom, oy + E.y * zoom, 3, 0, 7); k.fill(); }
+      cell.appendChild(cv);
+    } catch (e) { cell.innerHTML = `<div class="err">${e.message}</div>`; console.error(e); }
+    const lbl = document.createElement('div'); lbl.className = 'lbl';
+    lbl.textContent = `${id} · ${v.season || 'summer'}${v.variant ? ' · ' + v.variant : ''}${v.state ? ' · ' + JSON.stringify(v.state) : ''}`;
+    cell.appendChild(lbl);
+    sheet.appendChild(cell);
+  }
+}
+window.__READY__ = true;
+</script>
+</body>
+</html>
