@@ -37,13 +37,17 @@
     scene.items = (o.items || []).filter(i => DEFS[i.id]).map(i => mkItem(i.id, i.x, i.y, { s: i.s, flip: i.flip, state: Object.assign({}, i.state), flags: Object.assign({}, i.flags) }));
   }
   let saveTimer = 0;
+  function saveNow() {
+    clearTimeout(saveTimer); saveTimer = 0;
+    save.scene = serialize();
+    try { localStorage.setItem(KEY, JSON.stringify(save)); } catch (e) { /* 存不下也别打断游戏 */ }
+  }
   function saveSoon() {
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      save.scene = serialize();
-      try { localStorage.setItem(KEY, JSON.stringify(save)); } catch (e) { /* 存不下也别打断游戏 */ }
-    }, 350);
+    saveTimer = setTimeout(saveNow, 350);
   }
+  window.addEventListener('pagehide', () => { if (saveTimer) saveNow(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && saveTimer) saveNow(); });
 
   // ---------- 画布尺寸 ----------
   const cv = $('#stage'), ctx = cv.getContext('2d');
@@ -283,8 +287,16 @@
     PB.changed('user');
   }
   // 放下：不在合法区域就落到最近的合法位置
+  const SWIMMERS = { duck: 1, ducklings: 1, boat: 1 };
   function land(st) {
-    const [cx, cy] = constrain(st.id, st.x, st.y);
+    let [cx, cy] = constrain(st.id, st.x, st.y);
+    // 水里的东西放到池塘附近就吸进水面
+    if (SWIMMERS[st.id] && !PB.pondAt(cx, cy) && PB.pondAt(cx, cy, 1.7)) {
+      const p = PB.pondAt(cx, cy, 1.7), k = kOf(p), f = DEFS.pond.foot;
+      const dx = (cx - p.x) / (f.rx * k), dy = (cy - p.y) / (f.ry * k), d = Math.hypot(dx, dy) || 1;
+      const r = Math.min(d, 0.6) / d;
+      cx = p.x + dx * r * f.rx * k; cy = p.y + dy * r * f.ry * k;
+    }
     const far = Math.hypot(cx - st.x, cy - st.y) > 24;
     const finish = () => {
       st.pop = { type: 'stick', t0: now() };
@@ -328,7 +340,8 @@
       pushUndo();
       const k = kOf(st);
       st.state = Object.assign({}, st.state, { cat: false });
-      const c = mkItem('cat', st.x + 70 * k, st.y + 12 * k, { pop: 'spawn' });
+      const [wx, wy] = constrain('cat', st.x + 105 * k * (Math.random() < 0.5 ? -1 : 1), st.y + 16 * k);
+      const c = mkItem('cat', wx, wy, { pop: 'spawn', flip: wx < st.x });
       scene.items.push(c);
       c.tw = { x0: st.x, y0: st.y - 22 * k, x1: c.x, y1: c.y, t0: now(), dur: 0.45, arc: 40 };
       PB.later(0.45, () => { c.tw = null; });
@@ -580,10 +593,10 @@
     } else {
       el.classList.remove('empty');
       const s = PB.jobState(job), best = save.jobs[job.id] || 0;
-      const li = (c, bonus) => `<li class="${c.ok ? 'ok' : ''} ${bonus ? 'bonus' : ''}"><i>${c.ok ? (bonus ? '★' : '✓') : ''}</i><span>${c.text}</span></li>`;
+      const li = (c, bonus) => `<li class="${c.ok ? 'ok' : ''} ${bonus ? 'bonus' : ''}"><i>${c.ok ? (bonus ? '★' : '✓') : ''}</i><span>${c.text}${c.h && !c.ok ? `<em>${c.h}</em>` : ''}</span></li>`;
       html = `<div class="pin"></div>
         <div class="hd"><canvas></canvas><div><div class="tt">${job.title}</div><div class="tx">${job.text}</div></div></div>
-        <ul class="conds">${s.req.map(c => li(c)).join('')}<li class="sep">加分</li>${s.bonus.map(c => li(c, true)).join('')}</ul>
+        <ul class="conds"><li class="sep">要求</li>${s.req.map(c => li(c)).join('')}<li class="sep">加分（每项多一颗星）</li>${s.bonus.map(c => li(c, true)).join('')}</ul>
         <div class="ft"><span class="stars" title="${best ? '最好成绩 ' + best + ' 星' : ''}">${starsHtml(s.stars)}</span>
         <button class="link" data-act="board">换一个</button>
         <button class="chip ${s.ready ? 'ready' : ''}" id="btnDeliver" data-act="deliver" ${s.ready ? '' : 'disabled'}>交付</button></div>`;

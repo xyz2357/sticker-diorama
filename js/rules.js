@@ -306,13 +306,13 @@
   const JOBS = [
     {
       id: 'duckhome', title: '鸭子的家', client: 'duck', text: '想要一个能游泳的池塘，旁边再种点花草。',
-      req: [has('pond', 1), { t: '鸭子在水里游', f: () => swimmers() > 0 }],
-      bonus: [{ t: '池塘上架一座小桥', f: () => !!bridgeOverPond() }, { t: '植物', n: 4, f: plants }],
+      req: [has('pond', 1), { t: '鸭子在水里游', h: '把鸭子拖到池塘水面上', f: () => swimmers() > 0 }],
+      bonus: [{ t: '池塘上架一座小桥', h: '小木桥在「小物」里', f: () => !!bridgeOverPond() }, { t: '植物', n: 4, h: '树、花、草都算', f: plants }],
     },
     {
       id: 'spring', title: '春天来信', client: 'bird', text: '春天到了，想看看开花的树。',
       req: [isS('spring'), has('tree', 1), has('flowers', 2)],
-      bonus: [{ t: '有蝴蝶', f: () => cnt('butterfly') > 0 }, { t: '树上有鸟窝', f: () => all('tree').some(t => t.state.nest) }],
+      bonus: [{ t: '有蝴蝶', h: '春天白天，花丛会引来蝴蝶', f: () => cnt('butterfly') > 0 }, { t: '树上有鸟窝', h: '把小鸟放到树下', f: () => all('tree').some(t => t.state.nest) }],
     },
     {
       id: 'autumn', title: '秋天的小屋', client: 'rabbit', text: '秋天了，想要一间被树围着的小屋。',
@@ -321,23 +321,23 @@
     },
     {
       id: 'afterrain', title: '雨过天晴', client: 'frog', text: '下过雨的池塘最舒服了。',
-      req: [has('rainbow', 1), has('pond', 1), has('frog', 1)],
+      req: [{ t: '彩虹', h: '雨云挨着太阳', f: () => cnt('rainbow') > 0 }, has('pond', 1), { t: '青蛙', h: '让雨落进池塘', f: () => cnt('frog') > 0 }],
       bonus: [has('lotus', 1), { t: '鸭子在水里游', f: () => swimmers() > 0 }],
     },
     {
       id: 'summernight', title: '夏夜', client: 'cat', text: '夏天的晚上，想找个凉快的地方打个盹。',
       req: [isS('summer'), isT('night'), has('bench', 1)],
-      bonus: [{ t: '猫在长椅上睡觉', f: () => all('bench').some(b => b.state.cat) }, { t: '有萤火虫', f: () => cnt('firefly') > 0 || cnt('grass') > 0 }],
+      bonus: [{ t: '猫在长椅上睡觉', h: '把猫放到长椅旁边', f: () => all('bench').some(b => b.state.cat) }, { t: '有萤火虫', h: '夏夜的草丛里会有', f: () => cnt('firefly') > 0 || cnt('grass') > 0 }],
     },
     {
       id: 'snownight', title: '雪夜', client: 'snowman', text: '下雪的晚上，窗子要亮着。',
-      req: [isS('winter'), isT('night'), has('house', 1), has('snowman', 1)],
+      req: [isS('winter'), isT('night'), has('house', 1), { t: '雪人', h: '冬天让雪云下在石头上', f: () => cnt('snowman') > 0 }],
       bonus: [has('lantern', 2), has('pine', 3)],
     },
     {
       id: 'wish', title: '许个愿', client: 'star', text: '想坐在长椅上，看着月亮许个愿。',
       req: [isT('night'), has('moon', 1), has('bench', 1)],
-      bonus: [has('star', 3), has('rabbit', 1)],
+      bonus: [{ t: '星星', n: 3, h: '先在夜里看一次流星', f: () => cnt('star') }, has('rabbit', 1)],
     },
     {
       id: 'farm', title: '热闹农场', client: 'rabbit', text: '把大家都叫来吧，越热闹越好！',
@@ -347,15 +347,15 @@
     {
       id: 'village', title: '水边小镇', client: 'boat', text: '想住在有池塘和小桥的小镇上。',
       req: [has('house', 3), has('pond', 1), has('bridge', 1)],
-      bonus: [{ t: '小船在水上', f: () => all('boat').some(b => pondAt(b.x, b.y)) }, { t: '天黑后亮着两盏路灯', f: () => scene.time !== 'day' && cnt('lantern') >= 2 }],
+      bonus: [{ t: '小船在水上', h: '架好小桥就能解锁小船', f: () => all('boat').some(b => pondAt(b.x, b.y)) }, { t: '天黑后亮着两盏路灯', f: () => scene.time !== 'day' && cnt('lantern') >= 2 }],
     },
   ];
   const JMAP = Object.fromEntries(JOBS.map(j => [j.id, j]));
 
   function condState(c) {
     const v = c.f();
-    if (c.n) return { ok: v >= c.n, text: `${c.t} ${Math.min(v, c.n)}/${c.n}` };
-    return { ok: !!v, text: c.t };
+    if (c.n) return { ok: v >= c.n, text: `${c.t} ${Math.min(v, c.n)}/${c.n}`, h: c.h };
+    return { ok: !!v, text: c.t, h: c.h };
   }
   function jobState(job) {
     const req = job.req.map(condState), bonus = job.bonus.map(condState);
