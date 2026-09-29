@@ -23,24 +23,28 @@
   // 所有反应里的移动都走这里：一格一格跳着走、带小抖动（见 world.js 的 twPose）。
   // o: dur | speed、arc（拱起的高度）、stride（每跳多远）、hopH、fps、ease、jitter、
   //    walk（地上走：大小随前后变、脚下有影子）、face（按方向翻面）、lockK（大小不变，飞的用）、
-  //    clip（上场时的遮挡）、string（露吊线）、noRod、cancel（被打断时调）
+  //    clip（上场时的遮挡）、string（露吊线）、noRod、cancel（被打断时调）、
+  //    from（从哪儿开始，默认当前位置）、keep（只是画面上在动，走完 st.x/st.y 不变——太阳月亮升落用）
   function move(st, x1, y1, o = {}, done) {
-    if (st.tw) { const p = PB.posOf(st); st.x = p.x; st.y = p.y; }
-    const d = Math.hypot(x1 - st.x, y1 - st.y);
+    let x0 = st.x, y0 = st.y;
+    if (o.from) [x0, y0] = o.from;
+    else if (st.tw) { const p = PB.posOf(st); x0 = st.x = p.x; y0 = st.y = p.y; }
+    const d = Math.hypot(x1 - x0, y1 - y0);
     const dur = o.dur || clamp(d / (o.speed || 200), 0.35, 5);
     const T = {
-      x0: st.x, y0: st.y, x1, y1, t0: now(), dur, arc: o.arc || 0, puppet: true, fps: o.fps, ease: o.ease,
+      x0, y0, x1, y1, t0: now(), dur, arc: o.arc || 0, puppet: true, fps: o.fps, ease: o.ease, keep: !!o.keep,
       jitter: o.jitter, hops: o.stride ? Math.max(1, Math.round(d / o.stride)) : 0, hopH: o.hopH, walk: !!o.walk,
       sk: o.sk, seed: Math.random() * 1000, clip: o.clip, string: !!o.string, noRod: !!o.noRod,
     };
     // 纸片动作关掉时退回平滑移动
     if (!PB.opt.paper) { T.puppet = false; T.walk = false; T.arc = o.arc || 0; }
-    if (o.face && Math.abs(x1 - st.x) > 3) st.flip = x1 < st.x;
+    if (o.face && Math.abs(x1 - x0) > 3) st.flip = x1 < x0;
     st.kLock = o.lockK || !PB.opt.paper ? kOf(st) : null;
     st.tw = T;
     later(dur + 1 / (T.fps || 10), () => {
       if (st.tw !== T) { if (o.cancel) o.cancel(); return; }       // 半路被拎走了
-      st.x = x1; st.y = y1; st.tw = null; st.kLock = null;
+      if (!o.keep) { st.x = x1; st.y = y1; }
+      st.tw = null; st.kLock = null;
       if (done) done();
       PB.changed('react');
     });
@@ -110,16 +114,17 @@
   // 一出戏 = 一个 async 函数，按顺序 await 几个动作：
   //   s.wait(秒) / s.move(演员, x, y, 选项) / s.walk(演员, x, y) / s.enter(id, x, y, 'wing'|'trap'|'fly', 选项)
   //   s.swap(演员, 新id) / s.all([...]) 同时进行 / s.release(演员) 让它下场 / s.sfx(声音)
+  //   s.sky(太阳或月亮, 升起?, 选项) 升起 / 落下
   // 演员被拎走、被撕掉，或者撤销 / 清空，整出戏就停下（后面的步骤不再执行）。
   // 演戏期间演员是"忙"的，不会再触发别的反应；opts.spot=false 时不打追光。
   class Cut extends Error {}
   let gen = 0;
   const shows = new Set();
   function skit(actors, fn, opts = {}) {
-    const g = gen, S = { actors: actors.slice(), spot: opts.spot !== false };
+    const g = gen, S = { actors: actors.slice(), spot: opts.spot !== false, tag: opts.tag, cut: false };
     const ok = st => scene.items.includes(st) && !st.dying && st !== PB.dragItem;
     const check = () => {
-      if (g !== gen) throw new Cut();
+      if (g !== gen || S.cut) throw new Cut();
       for (const a of S.actors) if (!ok(a)) throw new Cut();
     };
     const wrap = pr => {
@@ -142,6 +147,7 @@
         return wrap(r.done);
       },
       swap: (st, id) => wrap(swapRaw(st, id)),
+      sky: (st, up, o = {}) => wrap(new Promise(res => skyTween(st, up, Object.assign({}, o, { cancel: () => res(CUT) }), () => res(st)))),
       all: ps => Promise.allSettled(ps).then(rs => { if (rs.some(r => r.status === 'rejected')) throw new Cut(); check(); }),
       release(st) { S.actors = S.actors.filter(a => a !== st); st.busy = 0; },
       sfx: (n, d) => PB.sfx(n, d),
@@ -158,6 +164,8 @@
     })();
     return S;
   }
+  // 停掉正在演的戏（tag 不给就全停）：演员把手上这一步走完，后面的不演了
+  function cutSkits(tag) { for (const S of shows) if (!tag || S.tag === tag) S.cut = true; }
   // 追光打在谁身上：正在演的戏里、此刻在动的演员（没人动就照全体演员）
   PB.spotActors = () => {
     const out = [];
@@ -224,9 +232,10 @@
   // ---------- 反应规则 ----------
   // 每条规则只负责"什么时候开演"：找到匹配就立刻开一出小剧本（演员马上变忙，不会重复触发）。
   // "刚贴上"：有些戏只认玩家刚贴上去的那一下（读档时不会自己演）
-  function justPlaced(ids) {
+  // freshOnly：只认刚从贴纸册拿出来的（挪一挪已经在盒子里的不算）
+  function justPlaced(ids, freshOnly) {
     const lp = PB.lastPlaced;
-    if (!lp || now() - lp.t > 2 || !ids.includes(lp.st.id) || !idle(lp.st)) return null;
+    if (!lp || now() - lp.t > 2 || !ids.includes(lp.st.id) || !idle(lp.st) || (freshOnly && !lp.fresh)) return null;
     return lp.st;
   }
   const REACT = [
@@ -407,7 +416,7 @@
         for (let leg = 0; leg < 7; leg++) {
           const [tx, ty] = runTarget(m, PB.posOf(c));
           const run = s.move(m, tx, ty, { speed: 320, stride: 30, hopH: 5 * kOf(m), walk: true, face: true, fps: 12 });
-          if (Math.random() < 0.5) s.sfx('squeak', 0.1);
+          if (Math.random() < 0.25) s.sfx('squeak', 0.1);
           await s.wait(0.3);
           const cp = PB.posOf(c), dx = tx - cp.x, dy = ty - cp.y, d = Math.hypot(dx, dy) || 1;
           const gap = Math.min(d, 75 * kOf(c));
@@ -419,25 +428,25 @@
         s.sfx('meow');
       });
     },
-    // 日落 / 日出：白天刚把月亮贴上天 → 太阳沿弧线沉到山后，天黑；夜里贴太阳反过来
+    // 日落 / 日出：新贴一个月亮 → 天上的太阳沿弧线沉到山后，天黑；新贴一个太阳反过来
     () => {
-      const st = justPlaced(['moon', 'sun']);
+      const st = justPlaced(['moon', 'sun'], true);
       if (!st) return;
-      let body = null, to = null;
-      if (st.id === 'moon' && scene.time !== 'night') { body = all('sun').find(idle); to = 'night'; }
-      else if (st.id === 'sun' && scene.time !== 'day') { body = all('moon').find(m => idle(m) && m !== st); to = 'day'; }
-      if (!body) return;
+      const to = st.id === 'moon' ? 'night' : 'day';
+      if (scene.time === to) return;
       PB.lastPlaced = null;
-      skit([body], async s => {
-        const B = PB.BACK, right = body.x >= (B.x0 + B.x1) / 2;
-        const sink = s.move(body, right ? B.x1 - 60 : B.x0 + 60, B.y1 + 90, { dur: 4.2, arc: 55, fps: 8, ease: 'in-out', jitter: 0.8 });
-        await s.wait(1.9);
+      // 山后面藏着的同类：新贴的这张顶替它，不然换回来时天上会多一个
+      scene.items.filter(o => o.id === st.id && o !== st && o.flags.down).forEach(removeNow);
+      const bodies = all(st.id === 'moon' ? 'sun' : 'moon').filter(b => b !== PB.dragItem);
+      skit(bodies, async s => {
+        const sink = bodies.map(b => s.sky(b, false, { dur: 4.2, arc: 55 }));
+        await s.wait(bodies.length ? 1.9 : 0.6);
         PB.setTime('dusk', true);
-        await sink;
-        s.release(body); removeNow(body);
+        if (bodies.length) await s.all(sink); else await s.wait(1.0);
         PB.setTime(to, true);
-        discover(to === 'night' ? 'riluo' : 'richu');
-      }, { spot: false });
+        if (bodies.length) discover(to === 'night' ? 'riluo' : 'richu');
+        syncSky(true);
+      }, { spot: false, tag: 'sky' });
     },
     // 午睡：猫 + 长椅 → 猫跳上长椅睡着
     () => {
@@ -502,15 +511,55 @@
     },
   ];
 
-  // 小鸟被吓飞：变成飞鸟，一格一格往斜上方逃
+  // 小鸟被吓飞：变成飞鸟，先扑腾起来，再斜着飞出盒口（飞进侧幕就没了；撤销能找回来）
   async function flyAway(s, b, dir, onFly) {
     const k = kOf(b), x0 = b.x, y0 = b.y - 16 * k;
     b.id = 'birdfly'; b.s = Math.max(0.7, k);
     b.x = x0; b.y = y0;
-    const [x1, y1] = constrain('birdfly', x0 + dir * 170, Math.max(PB.OPEN.y0 + 70, y0 - 280));
     s.sfx('chirp');
     if (onFly) onFly();
-    await s.move(b, x1, y1, { dur: 1.3, arc: 50, lockK: true, face: true, jitter: 1.3 });
+    await s.move(b, x0 + dir * 50, y0 - 60, { dur: 0.45, arc: 14, lockK: true, face: true, jitter: 1.4 });
+    const O = PB.OPEN, bw = PB.boxOf(b).w;
+    const ex = dir > 0 ? O.x1 + bw / 2 + 30 : O.x0 - bw / 2 - 30;
+    const ey = Math.max(O.y0 + 30, y0 - 60 - Math.abs(ex - x0) * 0.35);
+    await s.move(b, ex, ey, { speed: 420, arc: 30, lockK: true, face: true, jitter: 1.3 });
+    s.release(b); removeNow(b);
+  }
+
+  // ---------- 太阳和月亮跟着时段走 ----------
+  // 白天天上只有太阳，夜里只有月亮，黄昏两个都可以在。不该在天上的沉到山后面藏起来（flags.down，
+  // 原来的位置还记着），时段换回来再从山后升回原处。关掉"贴纸互动"就不管这些，全部露出来。
+  const SKY_UP = { day: { sun: 1 }, dusk: { sun: 1, moon: 1 }, night: { moon: 1 } };
+  const isBody = st => st.id === 'sun' || st.id === 'moon';
+  function lowOf(st) {
+    const B = PB.BACK, right = st.x >= (B.x0 + B.x1) / 2;
+    return [right ? B.x1 - 60 : B.x0 + 60, B.y1 + 90];
+  }
+  // 升起 / 落下：st.x、st.y 一直是它在天上的位置，动画只是画面上的
+  function skyTween(st, up, o = {}, done) {
+    let from = up ? lowOf(st) : [st.x, st.y];
+    if (st.tw && st.tw.sky) { const P = PB.twPose(st.tw, now()); from = [P.x, P.gy]; }   // 半路掉头：从现在的位置接着走
+    if (up) delete st.flags.down;
+    const [x1, y1] = up ? [st.x, st.y] : lowOf(st);
+    const T = move(st, x1, y1, Object.assign({ from, keep: true, dur: 1.6, arc: 50, fps: 8, ease: 'in-out', jitter: 0.8 }, o), () => {
+      if (!up) st.flags.down = 1;
+      if (done) done();
+    });
+    T.sky = up ? 'up' : 'down';
+    return T;
+  }
+  // 让天上的东西和现在的时段对上（anim = 动画升落，否则立刻）
+  function syncSky(anim) {
+    const want = SKY_UP[scene.time];
+    for (const st of scene.items) {
+      if (!isBody(st) || st.dying || st === PB.dragItem) continue;
+      const up = !PB.opt.react || !!want[st.id];
+      const isUp = st.tw && st.tw.sky ? st.tw.sky === 'up' : !st.flags.down;
+      if (isUp === up) continue;
+      if (anim) { skyTween(st, up); continue; }
+      if (st.tw && st.tw.sky) st.tw = null;
+      if (up) delete st.flags.down; else st.flags.down = 1;
+    }
   }
 
   // 猫捉老鼠：老鼠下一段往哪跑（尽量远离猫）
@@ -560,7 +609,7 @@
   }
 
   function evaluate() {
-    for (const r of REACT) r();
+    if (PB.opt.react) for (const r of REACT) r();
     for (const [id, test] of AMBIENT) {
       if (PB.save.disc[id]) continue;
       const hit = test();
@@ -659,7 +708,7 @@
   }
 
   Object.assign(PB, {
-    DISC, DMAP, JOBS, JMAP, evaluate, runJobs, later, discover, jobState, move, skit,
+    DISC, DMAP, JOBS, JMAP, evaluate, runJobs, later, discover, jobState, move, skit, cutSkits, syncSky,
     clearJobs: () => { jobs.length = 0; gen++; shows.clear(); },
   });
 })();

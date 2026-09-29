@@ -224,6 +224,8 @@
   .sw i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 2px solid var(--ink); transition: transform .15s; box-sizing: border-box; }
   .sw input:checked + i { background: #9fe07f; }
   .sw input:checked + i::after { transform: translateX(20px); }
+  .opts-h { font: 15px/1 var(--display); opacity: .6; margin: 8px 2px -2px; }
+  .opts-h:first-child { margin-top: 0; }
   .opts-foot { font-size: 12.5px; opacity: .65; margin-top: 4px; }
   .card { background: #fffdf7; border-radius: 14px; padding: 12px; display: flex; gap: 10px; align-items: flex-start; border: 1.5px solid #eadfc9; }
   .card canvas { width: 58px; height: 58px; flex: none; }
@@ -327,7 +329,7 @@
     <button class="chip primary" id="btnPhoto" title="把现在的盒子拍下来"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span class="lbl">拍照</span></button>
     <button class="chip icon" id="btnUndo" title="撤销（Ctrl+Z）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
     <button class="chip icon" id="btnClear" title="清空盒子"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
-    <button class="chip icon" id="btnOpt" title="设置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v2.6M12 18.9v2.6M4.6 4.6l1.9 1.9M17.5 17.5l1.9 1.9M2.5 12h2.6M18.9 12h2.6M4.6 19.4l1.9-1.9M17.5 6.5l1.9-1.9"/></svg></button>
+    <button class="chip icon" id="btnOpt" title="设置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M10.29 4.59L10.58 1.90L13.42 1.90L13.71 4.59A7.6 7.6 0 0 1 16.03 5.55L18.14 3.85L20.15 5.86L18.45 7.97A7.6 7.6 0 0 1 19.41 10.29L22.10 10.58L22.10 13.42L19.41 13.71A7.6 7.6 0 0 1 18.45 16.03L20.15 18.14L18.14 20.15L16.03 18.45A7.6 7.6 0 0 1 13.71 19.41L13.42 22.10L10.58 22.10L10.29 19.41A7.6 7.6 0 0 1 7.97 18.45L5.86 20.15L3.85 18.14L5.55 16.03A7.6 7.6 0 0 1 4.59 13.71L1.90 13.42L1.90 10.58L4.59 10.29A7.6 7.6 0 0 1 5.55 7.97L3.85 5.86L5.86 3.85L7.97 5.55A7.6 7.6 0 0 1 10.29 4.59Z"/><circle cx="12" cy="12" r="3.3"/></svg></button>
     <button class="chip icon" id="btnMute" title="声音"><svg id="icoSound" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="w" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/><path class="m" d="M17 9l5 6M22 9l-5 6" style="display:none"/></svg></button>
   </header>
 

@@ -18,6 +18,10 @@ SCENES = {
                 "__TEST__.place('raincloud', 600, 200)", 3.2, [1.0, 1.4, 1.8, 2.2, 2.6, 3.1]),
     'hog': ("__TEST__.setSeason('autumn'); __TEST__.place('tree', 520, 520); __TEST__.place('mushroom', 600, 560)",
             "0", 3.6, [1.6, 1.9, 2.2, 2.6, 3.0, 3.5]),
+    'birdout': ("__TEST__.setSeason('spring'); __TEST__.place('bird', 820, 560); __TEST__.place('tree', 380, 500)",
+                "__TEST__.place('cat', 740, 590)", 3.4, [0.3, 0.7, 1.1, 1.6, 2.2, 3.2]),
+    'nightbtn': ("__TEST__.setSeason('summer'); __TEST__.place('sun', 900, 170); __TEST__.place('moon', 380, 150); __TEST__.setTime('day'); PB.syncSky(false); __TEST__.place('house', 800, 470)",
+                 "__TEST__.setTime('night')", 2.4, [0.1, 0.5, 0.8, 1.1, 1.5, 2.3]),
 }
 names = sys.argv[1:] or list(SCENES)
 with sync_playwright() as p:

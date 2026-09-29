@@ -20,6 +20,8 @@
   if (!save || save.v !== 1) save = freshSave();
   save = Object.assign(freshSave(), save);
   PB.save = save;
+  // 后来才加的基础贴纸（老鼠、绵羊……）：旧存档的解锁表里没有，补上并标"新"
+  for (const id in DEFS) if (DEFS[id].base && !save.unlocked[id]) { save.unlocked[id] = 1; if (save.scene) save.fresh[id] = 1; }
   if (save.opt) Object.assign(PB.opt, save.opt);
   // 用户"亲手"贴上去的：纸片模式下不放大弹出，只是按一下
   const popIn = () => PB.opt.paper ? 'stick' : 'spawn';
@@ -29,10 +31,14 @@
   function serialize() {
     return {
       season: scene.season, time: scene.time,
-      items: scene.items.filter(s => !s.dying && s !== PB.dragItem).map(s => ({
-        id: s.id, x: +(s.tw ? s.tw.x1 : s.x).toFixed(1), y: +(s.tw ? s.tw.y1 : s.y).toFixed(1),
-        s: +s.s.toFixed(3), flip: s.flip, state: s.state, flags: s.flags,
-      })),
+      items: scene.items.filter(s => !s.dying && s !== PB.dragItem).map(s => {
+        const mv = s.tw && !s.tw.keep, sky = s.tw && s.tw.sky;
+        return {
+          id: s.id, x: +(mv ? s.tw.x1 : s.x).toFixed(1), y: +(mv ? s.tw.y1 : s.y).toFixed(1),
+          s: +s.s.toFixed(3), flip: s.flip, state: s.state,
+          flags: sky ? Object.assign({}, s.flags, { down: sky === 'down' ? 1 : 0 }) : s.flags,
+        };
+      }),
     };
   }
   function deserialize(o) {
@@ -129,6 +135,7 @@
     if (!auto) pushUndo();
     startTransition('fade');
     scene.time = t; PB.sfx('whoosh');
+    if (!auto) { PB.cutSkits('sky'); PB.syncSky(true); }
     syncSegs(); PB.changed('time');
   }
   PB.setTime = setTime;
@@ -296,7 +303,7 @@
   function endDrag(e) {
     const st = drag.st, d = drag; drag = null;
     ghost.style.display = 'none';
-    if (!d.moved) { PB.dragItem = null; poke(st); return; }
+    if (!d.moved) { PB.dragItem = null; st.interrupted = false; poke(st); return; }
     PB.dragItem = null; st.lift = 0; st.lean = 0;
     if (!d.inside) {
       if (d.fromShelf) { PB.sfx('tick'); return; }
@@ -306,13 +313,13 @@
     }
     pushUndo(d.fromShelf ? null : d.undo);
     if (d.fromShelf) scene.items.push(st);
-    land(st);
+    land(st, d.fromShelf);
     select(st);
     PB.changed('user');
   }
   // 放下：不在合法区域就落到最近的合法位置
   const SWIMMERS = { duck: 1, ducklings: 1, boat: 1 };
-  function land(st) {
+  function land(st, fresh) {
     let [cx, cy] = constrain(st.id, st.x, st.y);
     // 水里的东西放到池塘附近就吸进水面
     if (SWIMMERS[st.id] && !PB.pondAt(cx, cy) && PB.pondAt(cx, cy, 1.7)) {
@@ -323,7 +330,9 @@
     }
     const far = Math.hypot(cx - st.x, cy - st.y) > 24;
     const finish = () => {
-      PB.lastPlaced = { st, t: now() };        // 刚贴上去的：有些反应只认"刚贴"
+      // 刚贴上去的：有些反应只认"刚贴"。演到一半被拎走的，放下时不算（不然一放下又开演）
+      PB.lastPlaced = st.interrupted ? null : { st, t: now(), fresh: !!fresh };
+      st.interrupted = false;
       st.pop = { type: 'stick', t0: now() };
       PB.sfx('stick');
       if (DEFS[st.id].zone === 'ground') dust(st.x, st.y, kOf(st));
@@ -345,7 +354,7 @@
     else { st.x = rnd(OPEN.x0 + 200, OPEN.x1 - 200); st.y = rnd(OPEN.y0 + 80, 280); }
     pushUndo();
     scene.items.push(st);
-    PB.lastPlaced = { st, t: now() };
+    PB.lastPlaced = { st, t: now(), fresh: true };
     PB.sfx('stick'); clearFresh(id);
     const v = DEFS[id].voice; if (v) PB.sfx(v, 0.15);
     select(st);
@@ -387,6 +396,7 @@
     const t = now();
     const hit = pickOrder().find(st => (!st.tw || st.tw.puppet) && hitTest(st, wx, wy, t));
     if (hit) {
+      if (hit.busy) hit.interrupted = true;
       if (hit.tw) { const p = PB.posOf(hit); hit.x = p.x; hit.y = p.y; hit.tw = null; hit.kLock = null; }
       select(hit); startExistingDrag(hit, e, wx, wy);
     }
@@ -523,6 +533,7 @@
     return out;
   }
   function drawPartnerHints(t) {
+    if (!PB.opt.react) return;
     const st = drag.st, ps = partnersOf(st.id);
     if (!ps.length) return;
     for (const o of scene.items) {
@@ -789,7 +800,8 @@
   };
   $('#btnUndo').onclick = undo;
   function openOpts() {
-    const body = openModal('设置', '舞台感', `<div class="opts">${PB.OPT_DEFS.map(([k, n, d]) => `
+    const body = openModal('设置', '', `<div class="opts">${PB.OPT_DEFS.map(([k, n, d, g], i) => `
+      ${i === 0 || PB.OPT_DEFS[i - 1][3] !== g ? `<div class="opts-h">${g}</div>` : ''}
       <label class="opt"><div class="t"><div class="n">${n}</div><div class="d">${d}</div></div>
         <span class="sw"><input type="checkbox" data-k="${k}" ${PB.opt[k] ? 'checked' : ''}><i></i></span></label>`).join('')}
       <div class="opts-foot">改了马上生效，会记在这个浏览器里。</div></div>`, 'narrow');
@@ -798,6 +810,8 @@
       PB.opt[k] = e.target.checked;
       save.opt = Object.assign({}, PB.opt); saveSoon();
       if (k === 'curtain' && PB.opt.curtain) { PB.curtainSet(0); PB.curtainTo(1, 1.3); PB.sfx('whoosh'); }
+      // 互动：关掉时正在演的戏停下、藏在山后的太阳月亮升回来；打开时按时段重新升落
+      if (k === 'react') { PB.cutSkits(); PB.syncSky(true); PB.changed('opt'); }
       PB.sfx('tick');
     });
   }
@@ -818,7 +832,7 @@
     PB.setRain(rain);
     if (t !== 'night' && s !== 'winter' && (all('bird').length || all('birdfly').length) && Math.random() < 0.07) PB.sfx('chirp');
     if (all('frog').length && (t === 'night' || rain) && Math.random() < 0.08) PB.sfx('croak');
-    if (s === 'summer' && t === 'night' && all('grass').length && Math.random() < 0.35) PB.sfx('cricket');
+    if (s === 'summer' && t === 'night' && all('grass').length && Math.random() < 0.15) PB.sfx('cricket');
     if (all('duck').some(d => PB.pondAt(d.x, d.y)) && Math.random() < 0.025) PB.sfx('quack');
   }, 1000);
 
@@ -859,6 +873,7 @@
   function syncDepth() { depthInput.value = Math.round(PB.getDepth() * 100); }
   depthInput.addEventListener('input', () => {
     PB.setDepth(depthInput.value / 100);
+    PB.syncSky(false);
     save.depth = PB.getDepth();
     saveSoon();
   });
@@ -869,6 +884,7 @@
     // 先定景深，再读档（读档时按当前盒子形状约束贴纸位置）
     PB.setDepth(save.depth || PB.DEPTH_DEFAULT); syncDepth();
     if (save.scene && save.scene.items) deserialize(save.scene); else starter();
+    PB.syncSky(false);                       // 旧存档里夜里挂着的太阳：直接藏到山后
     buildSegs(); buildTabs(); resize(); buildShelf(); updateCounts(); syncMute(); renderJob();
     showTip(TIPS[0]); tipI = 1;
     if (matchMedia('(pointer: coarse)').matches) $('#bookHint').textContent = '按住拖进盒子 · 点一下也能贴';
@@ -888,7 +904,7 @@
     setSeason, setTime,
     opt(k, v) { if (v !== undefined) { PB.opt[k] = v; save.opt = Object.assign({}, PB.opt); } return Object.assign({}, PB.opt); },
     // 模拟"玩家刚把它贴上去"：有些小戏只认这一下
-    placeLive(id, x, y, o = {}) { const st = mkItem(id, x, y, o); scene.items.push(st); PB.lastPlaced = { st, t: now() }; PB.changed('test'); return st.uid; },
+    placeLive(id, x, y, o = {}) { const st = mkItem(id, x, y, o); scene.items.push(st); PB.lastPlaced = { st, t: now(), fresh: o.fresh !== false }; PB.changed('test'); return st.uid; },
     clear() { scene.items = []; PB.clearJobs(); PB.parts.length = 0; PB.changed('test'); },
     unlockAll() { for (const id in DEFS) save.unlocked[id] = 1; buildShelf(); },
     resetSave() { localStorage.removeItem(KEY); localStorage.removeItem(AKEY); },

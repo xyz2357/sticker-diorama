@@ -4,7 +4,7 @@
   const PB = window.PB = window.PB || {};
   const TAU = Math.PI * 2;
   // 舞台感开关（设置里可以关）；ui.js 读档后会覆盖
-  PB.opt = PB.opt || { paper: true, entrance: true, curtain: true, spot: true, rods: true };
+  PB.opt = PB.opt || { react: true, paper: true, entrance: true, curtain: true, spot: true, rods: true };
   const PAPER_FPS = 12;             // 纸片动作下，整个画面每秒换几格
   const IDLE_FPS = 6;               // 平时的小动作每秒几格
 
@@ -116,8 +116,9 @@
       pop: o.pop ? { type: o.pop, t0: now() } : null,
     };
   }
-  const live = () => scene.items.filter(s => !s.dying);
-  const all = id => scene.items.filter(s => s.id === id && !s.dying);
+  // flags.down：太阳 / 月亮落到山后面藏起来了（见 rules.js 的 syncSky），不画、不算、点不到
+  const live = () => scene.items.filter(s => !s.dying && !s.flags.down);
+  const all = id => scene.items.filter(s => s.id === id && !s.dying && !s.flags.down);
 
   function kOf(st) {
     if (st.kLock) return st.kLock;
@@ -418,7 +419,7 @@
   function layersOf(items) {
     const cel = [], flat = [], ground = [], air = [];
     for (const st of items) {
-      if (st === PB.dragItem) continue;
+      if (st === PB.dragItem || st.flags.down) continue;
       const z = DEFS[st.id].zone;
       if (z === 'celestial') cel.push(st);
       else if (z === 'flat') flat.push(st);
@@ -766,6 +767,8 @@
   }
 
   function lightLevel(id, time) { const l = DEFS[id].light; return l ? (l[time] || 0) : 0; }
+  // 正在升落的太阳 / 月亮按黄昏的亮度算（夜里落下去的太阳不该是一团暗褐色）
+  const glowOf = (st, time) => st.tw && st.tw.sky ? Math.max(lightLevel(st.id, time), lightLevel(st.id, 'dusk')) : lightLevel(st.id, time);
 
   function drawGlow(ctx, t, season, time, L) {
     // 夜空星星
@@ -783,7 +786,7 @@
     if (time !== 'day') {
       for (const st of [...L.cel, ...L.air, ...L.ground]) {
         if (!DEFS[st.id].emissive) continue;
-        const lv = lightLevel(st.id, time); if (!lv) continue;
+        const lv = glowOf(st, time); if (!lv) continue;
         if (DEFS[st.id].zone === 'celestial') {
           ctx.save(); skyClip(ctx);
           drawSticker(ctx, st, t, season, { alpha: 0.85 * lv, noShadow: true }); ctx.restore();
@@ -794,7 +797,7 @@
     ctx.globalCompositeOperation = 'lighter';
     for (const st of [...L.cel, ...L.flat, ...L.ground, ...L.air]) {
       if (st.dying) continue;
-      let lv = lightLevel(st.id, time); if (!lv) continue;
+      let lv = glowOf(st, time); if (!lv) continue;
       const b = bakeOf(st, season), X = xformOf(st, t);
       const cel = DEFS[st.id].zone === 'celestial';
       // 后墙上的太阳 / 月亮沉到山后面时光晕跟着淡掉，也只亮在后墙范围里
