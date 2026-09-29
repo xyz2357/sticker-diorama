@@ -34,7 +34,8 @@
   }
   function deserialize(o) {
     scene.season = o.season || 'summer'; scene.time = o.time || 'day';
-    scene.items = (o.items || []).filter(i => DEFS[i.id]).map(i => mkItem(i.id, i.x, i.y, { s: i.s, flip: i.flip, state: Object.assign({}, i.state), flags: Object.assign({}, i.flags) }));
+    // 盒子几何改过：读档时把贴纸挪回现在的合法范围（地面梯形、后墙）
+    scene.items = (o.items || []).filter(i => DEFS[i.id]).map(i => { const [x, y] = constrain(i.id, i.x, i.y); return mkItem(i.id, x, y, { s: i.s, flip: i.flip, state: Object.assign({}, i.state), flags: Object.assign({}, i.flags) }); });
   }
   let saveTimer = 0;
   function saveNow() {
@@ -790,10 +791,10 @@
   function starter() {
     scene.season = 'summer'; scene.time = 'day'; scene.items = [];
     const P = (id, x, y, o) => scene.items.push(mkItem(id, x, y, o || {}));
-    P('sun', 960, 165);
-    P('cloud', 400, 150);
-    P('pine', 250, 430);
-    P('tree', 360, 520);
+    P('sun', 915, 170);
+    P('cloud', 420, 150);
+    P('pine', 300, 432);
+    P('tree', 440, 530);
     P('house', 900, 455);
     P('fence', 1010, 520);
     P('grass', 470, 610, { flip: true });

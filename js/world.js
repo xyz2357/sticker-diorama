@@ -7,13 +7,19 @@
   // ---------- 几何 ----------
   // 世界坐标 1280×760。盒口（前沿内侧）+ 后墙 + 地面梯形，地面越靠前贴纸越大。
   const W = 1280, H = 760;
+  // 后墙宽度 / 盒口宽度：越小盒子越深。贴纸的纵深缩放由它推出来，两者始终一致
+  const BACK_RATIO = 0.62;
+  const K_FRONT = 1.35;             // 贴在最前沿时的缩放
   const OPEN = { x0: 40, y0: 40, x1: 1240, y1: 740 };
-  const BACK = { x0: 178, y0: 88, x1: 1102, y1: 388 };
+  const BW = (OPEN.x1 - OPEN.x0) * BACK_RATIO, CX = (OPEN.x0 + OPEN.x1) / 2;
+  const BACK = { x0: Math.round(CX - BW / 2), y0: 88, x1: Math.round(CX + BW / 2), y1: 388 };
   const FY0 = BACK.y1, FY1 = OPEN.y1;
   const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
   const lerp = (a, b, t) => a + (b - a) * t;
   const floorT = y => clamp((y - FY0) / (FY1 - FY0), 0, 1);
-  const depthK = y => 0.72 + 0.68 * floorT(y);
+  // 地面两条侧边的交点就是消失点；站在地上的东西，大小和它离消失点的距离成正比
+  const VY = FY1 - (FY1 - FY0) / (1 - BACK_RATIO);
+  const depthK = y => K_FRONT * (clamp(y, FY0, FY1) - VY) / (FY1 - VY);
   const floorX = y => { const t = floorT(y); return [lerp(BACK.x0, OPEN.x0, t), lerp(BACK.x1, OPEN.x1, t)]; };
 
   // ---------- 贴纸定义 ----------
