@@ -208,9 +208,25 @@
       showTip('这张还没解锁。打开「图鉴」看看线索。', true);
       return;
     }
+    if (e.pointerType === 'touch') {
+      // 触屏：按住一小会儿才拿起；在这之前滑动就是滚动贴纸册，轻点就是直接贴
+      pending = { id, x: e.clientX, y: e.clientY, tile, touch: true };
+      pending.timer = setTimeout(() => {
+        if (!pending || pending.id !== id || drag) return;
+        const p0 = pending; pending = null;
+        if (navigator.vibrate) navigator.vibrate(12);
+        startNewDrag(id, { clientX: p0.x, clientY: p0.y, pointerType: 'touch' });
+      }, 220);
+      return;
+    }
     e.preventDefault();
     pending = { id, x: e.clientX, y: e.clientY, tile };
   });
+  // 拖着贴纸时不让页面跟着滚
+  document.addEventListener('touchmove', e => { if (drag || (pending && !pending.touch)) e.preventDefault(); }, { passive: false });
+  // 触屏拖动时贴纸浮在手指上方，不被手指挡住
+  const TOUCH_LIFT = 56;
+  const liftPt = (e, d) => (d && d.touch ? { clientX: e.clientX, clientY: e.clientY - TOUCH_LIFT } : e);
   function clearFresh(id) {
     if (!save.fresh[id]) return;
     delete save.fresh[id]; saveSoon();
@@ -226,20 +242,21 @@
     if (full()) return;
     const st = mkItem(id, 0, 0, {});
     const b = bakeOf(st);
-    drag = { st, fromShelf: true, lox: 0, loy: -(b.box.y + b.box.h / 2), moved: true, lastX: e.clientX, vx: 0, inside: false };
+    drag = { st, fromShelf: true, lox: 0, loy: -(b.box.y + b.box.h / 2), moved: true, lastX: e.clientX, vx: 0, inside: false, touch: e.pointerType === 'touch' };
     st.lift = 1; PB.dragItem = st;
     PB.sfx('peel'); clearFresh(id); select(null);
     moveDrag(e);
   }
   function startExistingDrag(st, e, wx, wy) {
     const k = kOf(st);
-    drag = { st, fromShelf: false, lox: (st.x - wx) / k, loy: (st.y - wy) / k, moved: false, sx: e.clientX, sy: e.clientY, lastX: e.clientX, vx: 0, inside: true, undo: snapshot() };
+    drag = { st, fromShelf: false, lox: (st.x - wx) / k, loy: (st.y - wy) / k, moved: false, sx: e.clientX, sy: e.clientY, lastX: e.clientX, vx: 0, inside: true, undo: snapshot(), touch: e.pointerType === 'touch' };
   }
-  function moveDrag(e) {
-    const [wx, wy, inside] = toWorld(e);
+  function moveDrag(e0) {
     const st = drag.st, z = DEFS[st.id].zone;
+    if (!drag.moved && Math.hypot(e0.clientX - drag.sx, e0.clientY - drag.sy) < (drag.touch ? 8 : 4)) return;
+    const e = liftPt(e0, drag);
+    const [wx, wy, inside] = toWorld(e);
     if (!drag.moved) {
-      if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 4) return;
       drag.moved = true; st.lift = 1; PB.dragItem = st; st.tw = null; st.pop = null;
       PB.sfx('peel');
     }
@@ -364,7 +381,9 @@
   });
   window.addEventListener('pointermove', e => {
     if (pending && !drag) {
-      if (Math.hypot(e.clientX - pending.x, e.clientY - pending.y) > 5) { startNewDrag(pending.id, e); pending = null; }
+      const far = Math.hypot(e.clientX - pending.x, e.clientY - pending.y);
+      if (pending.touch) { if (far > 8) { clearTimeout(pending.timer); pending = null; } return; }
+      if (far > 5) { startNewDrag(pending.id, e); pending = null; }
       return;
     }
     if (drag) { moveDrag(e); return; }
@@ -377,10 +396,11 @@
   });
   let hover = null;
   window.addEventListener('pointerup', e => {
-    if (pending) { const id = pending.id; pending = null; quickPlace(id); return; }
+    if (pending) { const id = pending.id; clearTimeout(pending.timer); pending = null; quickPlace(id); return; }
     if (drag) endDrag(e);
   });
   window.addEventListener('pointercancel', () => {
+    if (pending) clearTimeout(pending.timer);
     pending = null;
     if (drag) { const st = drag.st; drag = null; PB.dragItem = null; st.lift = 0; ghost.style.display = 'none'; }
   });
@@ -536,8 +556,11 @@
   }
 
   // ---------- 提示条 ----------
+  const narrow = () => window.innerWidth <= 980;
   const TIPS = [
-    '从右边的贴纸册把贴纸拖进盒子。放得越靠下，贴纸越大、越靠前。',
+    () => matchMedia('(pointer: coarse)').matches
+      ? `按住${narrow() ? '下面' : '右边'}贴纸册里的贴纸，拖进盒子。放得越靠下，贴纸越大、越靠前。`
+      : `从${narrow() ? '下面' : '右边'}的贴纸册把贴纸拖进盒子。放得越靠下，贴纸越大、越靠前。`,
     '贴纸之间会起反应：把「雨云」挂到树苗正上方试试。',
     '换个季节、或者让天黑下来，盒子里的东西会跟着变。',
     '点一下盒子里的贴纸，可以翻转、放大、缩小；把它拖出盒子就撕掉了。',
@@ -550,6 +573,7 @@
   function showTip(text, urgent) {
     const el = $('#tipText');
     el.parentElement.style.opacity = 0;
+    if (typeof text === 'function') text = text();
     setTimeout(() => { el.textContent = text; el.parentElement.style.opacity = 0.92; }, urgent ? 60 : 300);
     clearTimeout(tipTimer);
     tipTimer = setTimeout(nextTip, urgent ? 7000 : 15000);
@@ -793,6 +817,7 @@
     if (save.scene && save.scene.items) deserialize(save.scene); else starter();
     buildSegs(); buildTabs(); resize(); buildShelf(); updateCounts(); syncMute(); renderJob();
     showTip(TIPS[0]); tipI = 1;
+    if (matchMedia('(pointer: coarse)').matches) $('#bookHint').textContent = '按住拖进盒子 · 点一下也能贴';
     window.addEventListener('resize', () => { resize(); });
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { PB.fontReady = true; buildShelf(); });
     requestAnimationFrame(frame);
