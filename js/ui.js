@@ -120,12 +120,15 @@
     scene.season = s; PB.sfx('whoosh');
     syncSegs(); buildShelf(); PB.changed('season');
   }
-  function setTime(t) {
+  // auto = 反应引起的（日落日出）：不单独进撤销，一次撤销就退回贴月亮之前
+  function setTime(t, auto) {
     if (t === scene.time) return;
-    pushUndo(); startTransition('fade');
+    if (!auto) pushUndo();
+    startTransition('fade');
     scene.time = t; PB.sfx('whoosh');
     syncSegs(); PB.changed('time');
   }
+  PB.setTime = setTime;
 
   // ---------- 转场 ----------
   let trans = null;
@@ -317,6 +320,7 @@
     }
     const far = Math.hypot(cx - st.x, cy - st.y) > 24;
     const finish = () => {
+      PB.lastPlaced = { st, t: now() };        // 刚贴上去的：有些反应只认"刚贴"
       st.pop = { type: 'stick', t0: now() };
       PB.sfx('stick');
       if (DEFS[st.id].zone === 'ground') dust(st.x, st.y, kOf(st));
@@ -338,6 +342,7 @@
     else { st.x = rnd(OPEN.x0 + 200, OPEN.x1 - 200); st.y = rnd(OPEN.y0 + 80, 280); }
     pushUndo();
     scene.items.push(st);
+    PB.lastPlaced = { st, t: now() };
     PB.sfx('stick'); clearFresh(id);
     const v = DEFS[id].voice; if (v) PB.sfx(v, 0.15);
     select(st);
@@ -361,8 +366,9 @@
       const [wx, wy] = constrain('cat', st.x + 105 * k * (Math.random() < 0.5 ? -1 : 1), st.y + 16 * k);
       const c = mkItem('cat', wx, wy, { pop: 'spawn', flip: wx < st.x });
       scene.items.push(c);
-      c.tw = { x0: st.x, y0: st.y - 22 * k, x1: c.x, y1: c.y, t0: now(), dur: 0.45, arc: 40 };
-      PB.later(0.45, () => { c.tw = null; });
+      const [ex, ey] = [c.x, c.y];
+      c.x = st.x; c.y = st.y - 22 * k;
+      PB.move(c, ex, ey, { dur: 0.5, arc: 40, face: true });
       c.flags.woke = 1;
       PB.sfx('meow');
       PB.changed('user');
@@ -376,8 +382,11 @@
     PB.unlockAudio();
     const [wx, wy] = toWorld(e);
     const t = now();
-    const hit = pickOrder().find(st => !st.tw && hitTest(st, wx, wy, t));
-    if (hit) { select(hit); startExistingDrag(hit, e, wx, wy); }
+    const hit = pickOrder().find(st => (!st.tw || st.tw.puppet) && hitTest(st, wx, wy, t));
+    if (hit) {
+      if (hit.tw) { const p = PB.posOf(hit); hit.x = p.x; hit.y = p.y; hit.tw = null; hit.kLock = null; }
+      select(hit); startExistingDrag(hit, e, wx, wy);
+    }
     else select(null);
   });
   window.addEventListener('pointermove', e => {
@@ -390,7 +399,7 @@
     if (drag) { moveDrag(e); return; }
     if (e.target === cv) {
       const [wx, wy] = toWorld(e), t = now();
-      const hit = pickOrder().find(st => !st.tw && hitTest(st, wx, wy, t));
+      const hit = pickOrder().find(st => (!st.tw || st.tw.puppet) && hitTest(st, wx, wy, t));
       cv.style.cursor = hit ? 'grab' : 'default';
       hover = hit || null;
     } else hover = null;
@@ -500,6 +509,7 @@
     ['raincloud', 'flowers', () => scene.season !== 'winter', f => !f.flags.snail],
     ['sheep', 'fence', () => true], ['cloud', 'windmill', () => true], ['raincloud', 'windmill', () => true],
     ['mushroom', 'tree', () => scene.season === 'autumn'],
+    ['cat', 'mouse', () => true], ['moon', 'sun', () => scene.time !== 'night'], ['sun', 'moon', () => scene.time !== 'day'],
   ];
   function partnersOf(id) {
     const out = [];

@@ -111,6 +111,7 @@
     },
     cricket(t) { for (let i = 0; i < 3; i++) osc('sine', 4200, 4300, t + i * 0.06, 0.03, 0.03); },
     boing(t) { osc('sine', 220, 520, t, 0.18, 0.2); },
+    squeak(t) { for (let i = 0; i < 2; i++) osc('sine', 2400 + i * 300, 3300, t + i * 0.1, 0.06, 0.07); },
     baa(t) {
       const o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter(), lfo = ctx.createOscillator(), lg = ctx.createGain();
       o.type = 'sawtooth'; o.frequency.setValueAtTime(330, t); o.frequency.linearRampToValueAtTime(300, t + 0.55);

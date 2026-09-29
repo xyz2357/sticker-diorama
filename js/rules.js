@@ -25,14 +25,40 @@
     const st = mkItem(id, x, y, { pop: 'spawn', flip: o.flip });
     scene.items.push(st);
     PB.sfx('pop');
-    if (o.from) flyTo(st, o.from[0], o.from[1], x, y, o.dur || 0.55, o.arc || 50);
-    else PB.changed('react');
+    if (o.from) {
+      st.x = o.from[0]; st.y = o.from[1];
+      if (o.walk) move(st, x, y, { dur: o.dur || 0.9, stride: 26, hopH: 4 * kOf(st), walk: true, face: true });
+      else move(st, x, y, { dur: o.dur || 0.6, arc: o.arc === undefined ? 50 : o.arc, lockK: true, sk: Math.max(o.from[1], y) + 0.5 });
+    } else PB.changed('react');
     return st;
   }
+  // ---------- 纸偶移动 ----------
+  // 所有反应里的移动都走这里：一格一格跳着走、带小抖动（见 world.js 的 twPose）。
+  // o: dur | speed、arc（拱起的高度）、stride（每跳多远）、hopH、fps、ease、jitter、
+  //    walk（地上走：大小随前后变、脚下有影子）、face（按方向翻面）、lockK（大小不变，飞的用）、cancel（被打断时调）
+  function move(st, x1, y1, o = {}, done) {
+    if (st.tw) { const p = PB.posOf(st); st.x = p.x; st.y = p.y; }
+    const d = Math.hypot(x1 - st.x, y1 - st.y);
+    const dur = o.dur || clamp(d / (o.speed || 200), 0.35, 5);
+    const T = {
+      x0: st.x, y0: st.y, x1, y1, t0: now(), dur, arc: o.arc || 0, puppet: true, fps: o.fps, ease: o.ease,
+      jitter: o.jitter, hops: o.stride ? Math.max(1, Math.round(d / o.stride)) : 0, hopH: o.hopH, walk: !!o.walk,
+      sk: o.sk, seed: Math.random() * 1000,
+    };
+    if (o.face && Math.abs(x1 - st.x) > 3) st.flip = x1 < st.x;
+    st.kLock = o.lockK ? kOf(st) : null;
+    st.tw = T;
+    later(dur + 1 / (T.fps || 10), () => {
+      if (st.tw !== T) { if (o.cancel) o.cancel(); return; }       // 半路被拎走了
+      st.x = x1; st.y = y1; st.tw = null; st.kLock = null;
+      if (done) done();
+      PB.changed('react');
+    });
+    return T;
+  }
   function flyTo(st, x0, y0, x1, y1, dur, arc, done) {
-    st.kLock = kOf(st);
-    st.tw = { x0, y0, x1, y1, t0: now(), dur, arc };
-    later(dur, () => { st.x = x1; st.y = y1; st.tw = null; st.kLock = null; if (done) done(); PB.changed('react'); });
+    st.x = x0; st.y = y0;
+    move(st, x1, y1, { dur, arc, lockK: true, sk: Math.max(y0, y1) + 0.5 }, done);
   }
   function transform(st, id) {
     st.id = id; st.state = {}; st.pop = { type: 'grow', t0: now() };
@@ -75,6 +101,9 @@
     { id: 'nanguadeng', name: '南瓜灯', icon: 'pumpkin', hint: '夜晚 · 南瓜', desc: '天黑了，南瓜的笑脸亮了起来。' },
     { id: 'ciwei', name: '刺猬', icon: 'hedgehog', unlock: 'hedgehog', hint: '秋天 · 蘑菇 + 大树', desc: '闻到蘑菇的香味，一只刺猬钻了出来。' },
     { id: 'woniu', name: '蜗牛', icon: 'snail', unlock: 'snail', hint: '雨云 + 花丛', desc: '下雨了，花丛里爬出一只蜗牛。' },
+    { id: 'zhuizhu', name: '猫捉老鼠', icon: 'mouse', hint: '猫 + 老鼠', desc: '把猫和老鼠贴在一起，它们就在盒子里追起来了。' },
+    { id: 'riluo', name: '日落', icon: 'sun', hint: '白天 · 太阳 + 月亮', desc: '月亮一上来，太阳就沿着弧线落到山后面，天黑了。' },
+    { id: 'richu', name: '日出', icon: 'moon', hint: '夜晚 · 月亮 + 太阳', desc: '太阳一上来，月亮就下山了，天亮了。' },
   ];
   const DMAP = Object.fromEntries(DISC.map(d => [d.id, d]));
 
@@ -186,18 +215,14 @@
     // 惊鸟：猫 + 小鸟 → 飞鸟
     () => {
       for (const c of all('cat')) for (const b of all('bird')) {
-        if (!idle(b) || !idle(c) || !near(c, b, 115)) continue;
+        if (!idle(b) || c.dying || c === PB.dragItem) continue;
+        const cp = PB.posOf(c);
+        if (!near({ x: cp.x, y: cp.y, id: 'cat', s: c.s }, b, 125)) continue;
         b.busy = 1;
-        later(0.35, () => {
+        later(0.3, () => {
           if (!scene.items.includes(b)) return;
-          const k = kOf(b), dir = b.x >= c.x ? 1 : -1;
-          const x0 = b.x, y0 = b.y - 16 * k;
-          b.id = 'birdfly'; b.s = Math.max(0.7, k); b.flip = dir < 0; b.busy = 0;
-          b.x = x0; b.y = y0;
-          const [x1, y1] = constrain('birdfly', x0 + dir * 130, Math.max(PB.OPEN.y0 + 70, y0 - 260));
-          PB.sfx('chirp');
-          flyTo(b, x0, y0, x1, y1, 0.9, 0);
-          discover('jingniao', [x0, y0]);
+          flyAway(b, b.x >= cp.x ? 1 : -1);
+          discover('jingniao', [b.x, b.y - 20]);
         });
       }
     },
@@ -206,16 +231,10 @@
       for (const c of all('scarecrow')) for (const b of all('bird')) {
         if (!idle(b) || !idle(c) || !near(c, b, 125)) continue;
         b.busy = 1;
-        later(0.35, () => {
+        later(0.3, () => {
           if (!scene.items.includes(b)) return;
-          const k = kOf(b), dir = b.x >= c.x ? 1 : -1;
-          const x0 = b.x, y0 = b.y - 16 * k;
-          b.id = 'birdfly'; b.s = Math.max(0.7, k); b.flip = dir < 0; b.busy = 0;
-          b.x = x0; b.y = y0;
-          const [x1, y1] = constrain('birdfly', x0 + dir * 140, Math.max(PB.OPEN.y0 + 70, y0 - 260));
-          PB.sfx('chirp');
-          flyTo(b, x0, y0, x1, y1, 0.9, 0);
-          discover('daocaoren', [x0, y0]);
+          flyAway(b, b.x >= c.x ? 1 : -1);
+          discover('daocaoren', [b.x, b.y - 20]);
         });
       }
     },
@@ -245,7 +264,7 @@
         later(1.6, () => {
           if (!scene.items.includes(m)) return;
           const k = kOf(m), side = Math.random() < 0.5 ? -1 : 1;
-          const h = spawn('hedgehog', m.x + side * 55 * k, m.y + 18 * k, { from: [m.x + side * 140 * k, m.y + 30 * k], arc: 0, dur: 0.9, flip: side > 0 });
+          const h = spawn('hedgehog', m.x + side * 55 * k, m.y + 18 * k, { from: [m.x + side * 140 * k, m.y + 30 * k], walk: true, dur: 1.2 });
           discover('ciwei', [h.x, h.y - 20]);
         });
       }
@@ -262,6 +281,33 @@
           const sn = spawn('snail', f.x + 45 * k, f.y + 10 * k);
           discover('woniu', [sn.x, sn.y - 16]);
         });
+      }
+    },
+    // 猫捉老鼠：刚把其中一只贴到另一只旁边
+    () => {
+      if (chase) return;
+      const lp = PB.lastPlaced;
+      if (!lp || now() - lp.t > 2) return;
+      const st = lp.st;
+      if ((st.id !== 'cat' && st.id !== 'mouse') || !idle(st)) return;
+      const other = all(st.id === 'cat' ? 'mouse' : 'cat').find(o => idle(o) && near(st, o, 175));
+      if (!other) return;
+      PB.lastPlaced = null;
+      const [c, m] = st.id === 'cat' ? [st, other] : [other, st];
+      later(0.35, () => { if (!chase && idle(c) && idle(m)) startChase(c, m); });
+    },
+    // 日落 / 日出：刚把月亮贴上天（白天有太阳），或刚把太阳贴上天（晚上有月亮）
+    () => {
+      if (skyMoving) return;
+      const lp = PB.lastPlaced;
+      if (!lp || now() - lp.t > 2) return;
+      const st = lp.st;
+      if (st.id === 'moon' && scene.time !== 'night') {
+        const sun = all('sun').find(idle);
+        if (sun) { PB.lastPlaced = null; setSky(sun, 'night'); }
+      } else if (st.id === 'sun' && scene.time !== 'day') {
+        const moon = all('moon').find(m => idle(m) && m !== st);
+        if (moon) { PB.lastPlaced = null; setSky(moon, 'day'); }
       }
     },
     // 午睡：猫 + 长椅
@@ -322,6 +368,78 @@
       }
     },
   ];
+
+  // 小鸟被吓飞：一格一格往斜上方逃，变成天上的飞鸟
+  function flyAway(b, dir) {
+    const k = kOf(b), x0 = b.x, y0 = b.y - 16 * k;
+    b.id = 'birdfly'; b.s = Math.max(0.7, k); b.busy = 0;
+    b.x = x0; b.y = y0;
+    const [x1, y1] = constrain('birdfly', x0 + dir * 170, Math.max(PB.OPEN.y0 + 70, y0 - 280));
+    PB.sfx('chirp');
+    move(b, x1, y1, { dur: 1.3, arc: 50, lockK: true, face: true, jitter: 1.3 });
+  }
+
+  // ---------- 猫捉老鼠 ----------
+  // 老鼠在地面上东窜西跑（尽量往远离猫的方向），猫慢半拍追到它落脚点跟前；跑 7 段停下。
+  let chase = null;
+  function runTarget(m, c) {
+    let best = null;
+    for (let i = 0; i < 14; i++) {
+      const a = Math.random() * Math.PI * 2, d = 170 + Math.random() * 170;
+      const [x, y] = constrain('mouse', m.x + Math.cos(a) * d, m.y + Math.sin(a) * d * 0.5);
+      const score = Math.hypot(x - c.x, (y - c.y) * 1.6) - Math.abs(Math.hypot(x - m.x, y - m.y) - 240) * 0.3;
+      if (!best || score > best[2]) best = [x, y, score];
+    }
+    return [best[0], best[1]];
+  }
+  function startChase(c, m) {
+    chase = { c, m, legs: 0 };
+    c.busy = m.busy = 1;
+    PB.sfx('squeak'); PB.sfx('meow', 0.3);
+    discover('zhuizhu', top(m));
+    chaseStep();
+  }
+  function stopChase() {
+    if (!chase) return;
+    chase.c.busy = chase.m.busy = 0;
+    chase = null;
+    PB.changed('react');
+  }
+  function chaseStep() {
+    if (!chase) return;
+    const { c, m } = chase;
+    const ok = st => scene.items.includes(st) && !st.dying && st !== PB.dragItem;
+    if (!ok(c) || !ok(m)) { stopChase(); return; }
+    if (chase.legs >= 7) { PB.sfx('meow'); stopChase(); return; }
+    chase.legs++;
+    const [tx, ty] = runTarget(m, PB.posOf(c));
+    const leg = move(m, tx, ty, { speed: 320, stride: 30, hopH: 5 * kOf(m), walk: true, face: true, fps: 12, cancel: stopChase },
+      () => later(0.2 + Math.random() * 0.45, chaseStep));
+    if (Math.random() < 0.5) PB.sfx('squeak', 0.1);
+    later(0.3, () => {
+      if (!chase || !ok(c)) return;
+      const cp = PB.posOf(c), dx = tx - cp.x, dy = ty - cp.y, d = Math.hypot(dx, dy) || 1;
+      const gap = Math.min(d, 75 * kOf(c));
+      const [cx, cy] = constrain('cat', tx - dx / d * gap, ty - dy / d * gap);
+      move(c, cx, cy, { dur: leg.dur, stride: 44, hopH: 6 * kOf(c), walk: true, face: true, fps: 12, cancel: stopChase });
+    });
+  }
+
+  // ---------- 日落 / 日出 ----------
+  // 太阳（或月亮）一格一格沿弧线落到远山后面；走到一半天变黄昏，落下去以后天黑（或天亮）。
+  let skyMoving = false;
+  function setSky(body, to) {
+    skyMoving = true; body.busy = 1;
+    const B = PB.BACK, right = body.x >= (B.x0 + B.x1) / 2;
+    const ex = right ? B.x1 - 60 : B.x0 + 60, ey = B.y1 + 90;
+    const cancel = () => { skyMoving = false; body.busy = 0; };
+    move(body, ex, ey, { dur: 4.2, arc: 55, fps: 8, ease: 'in-out', jitter: 0.8, cancel }, () => {
+      removeNow(body); skyMoving = false;
+      PB.setTime(to, true);
+      discover(to === 'night' ? 'riluo' : 'richu');
+    });
+    later(1.9, () => { if (skyMoving) PB.setTime('dusk', true); });
+  }
 
   // ---------- 状态型发现（条件满足就算） ----------
   const firstOf = id => { const a = all(id); return a.length ? a[0] : null; };
@@ -454,5 +572,8 @@
     return { req, bonus, ready, stars };
   }
 
-  Object.assign(PB, { DISC, DMAP, JOBS, JMAP, evaluate, runJobs, later, discover, jobState, clearJobs: () => { jobs.length = 0; } });
+  Object.assign(PB, {
+    DISC, DMAP, JOBS, JMAP, evaluate, runJobs, later, discover, jobState, move,
+    clearJobs: () => { jobs.length = 0; chase = null; skyMoving = false; },
+  });
 })();

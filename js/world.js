@@ -78,6 +78,7 @@
     pumpkin: { name: '南瓜', tab: 'nature', zone: 'ground', plant: 1, light: { dusk: 0.5, night: 1 } },
     hedgehog: { name: '刺猬', tab: 'animal', zone: 'ground', animal: 1, anim: 'hop' },
     snail: { name: '蜗牛', tab: 'animal', zone: 'ground', animal: 1 },
+    mouse: { name: '老鼠', tab: 'animal', zone: 'ground', base: 1, animal: 1, voice: 'squeak' },
   };
   const TABS = [
     { id: 'nature', name: '自然' }, { id: 'build', name: '小物' },
@@ -190,18 +191,55 @@
     return { ox, oy, rot, sx, sy };
   }
 
+  // ---------- 纸偶移动 ----------
+  // 像舞台上被人拿着走的纸片：位置不逐帧插值，而是一格一格地跳（每秒 fps 格），
+  // 每一格随机歪一点、抖一下；走路的会一跳一跳。贴纸本身不做任何动画。
+  const PUPPET_FPS = 10;
+  const hash = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+  // 返回 { x, y（画的位置）, gy（脚下的地面 y，用来算大小和排前后）, rot }
+  function twPose(T, t) {
+    if (!T.puppet) {
+      const e = clamp((t - T.t0) / T.dur, 0, 1), ee = e * e * (3 - 2 * e);
+      const gy = lerp(T.y0, T.y1, ee);
+      return { x: lerp(T.x0, T.x1, ee), y: gy - Math.sin(e * Math.PI) * (T.arc || 0), gy, rot: 0 };
+    }
+    const fps = T.fps || PUPPET_FPS;
+    const step = Math.max(0, Math.floor((t - T.t0) * fps));
+    const e = clamp(step / fps / T.dur, 0, 1);
+    const ee = T.ease === 'in-out' ? e * e * (3 - 2 * e) : e;
+    const gy = lerp(T.y0, T.y1, ee);
+    let x = lerp(T.x0, T.x1, ee), y = gy - Math.sin(ee * Math.PI) * (T.arc || 0), rot = 0;
+    if (e < 1) {
+      const j = T.jitter === undefined ? 1 : T.jitter, sd = (T.seed || 0) + step;
+      rot = (hash(sd) - 0.5) * 0.1 * j;
+      x += (hash(sd + 7.3) - 0.5) * 2.6 * j;
+      y += (hash(sd + 3.1) - 0.5) * 2.6 * j;
+      if (T.hops) y -= Math.abs(Math.sin(ee * Math.PI * T.hops)) * (T.hopH || 6);
+    }
+    return { x, y, gy, rot };
+  }
+  // 贴纸此刻脚下的位置（移动中取当前这一格）
+  function posOf(st, t = now()) {
+    if (!st.tw) return { x: st.x, y: st.y };
+    const P = twPose(st.tw, t);
+    return { x: P.x, y: P.gy };
+  }
+
   // 贴纸在世界里的完整变换（渲染和点选共用）
   function xformOf(st, t) {
-    const k = kOf(st) * popScale(st, t);
-    const a = animOf(st, t);
-    let x = st.x, y = st.y;
+    let x = st.x, y = st.y, trot = 0, k0 = kOf(st);
     if (st.tw) {
-      const T = st.tw, e = clamp((t - T.t0) / T.dur, 0, 1), ee = e * e * (3 - 2 * e);
-      x = lerp(T.x0, T.x1, ee); y = lerp(T.y0, T.y1, ee) - Math.sin(e * Math.PI) * (T.arc || 0);
+      const P = twPose(st.tw, t);
+      x = P.x; y = P.y; trot = P.rot;
+      const z = DEFS[st.id].zone;
+      // 地上走的纸偶：大小跟着它此刻的前后位置变
+      if (st.tw.puppet && !st.kLock && (z === 'ground' || z === 'flat')) k0 = depthK(P.gy) * st.s;
     }
+    const k = k0 * popScale(st, t);
+    const a = st.tw && st.tw.puppet ? { ox: 0, oy: 0, rot: 0, sx: 1, sy: 1 } : animOf(st, t);
     const dir = st.flip ? -1 : 1;
     return {
-      x: x + a.ox * k * dir, y: y + a.oy * k, rot: a.rot * dir + (st.lean || 0),
+      x: x + a.ox * k * dir, y: y + a.oy * k, rot: a.rot * dir + (st.lean || 0) + trot,
       kx: k * a.sx * dir, ky: k * a.sy, k,
     };
   }
@@ -298,7 +336,8 @@
       else if (z === 'ground') ground.push(st);
       else air.push(st);
     }
-    const yOf = st => st.tw ? Math.max(st.tw.y0, st.tw.y1) : st.y;
+    const tNow = now();
+    const yOf = st => !st.tw ? st.y : st.tw.puppet ? (st.tw.sk !== undefined ? st.tw.sk : twPose(st.tw, tNow).gy) : Math.max(st.tw.y0, st.tw.y1);
     flat.sort((a, b) => a.y - b.y);
     cel.sort((a, b) => (DEFS[a.id].zo || 0) - (DEFS[b.id].zo || 0));
     ground.sort((a, b) => yOf(a) - yOf(b) || a.uid - b.uid);
@@ -377,10 +416,18 @@
 
   function pathPoly(ctx, pts) { ctx.beginPath(); ctx.moveTo(pts[0], pts[1]); for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]); ctx.closePath(); }
 
-  function ridge(ctx, x0, x1, base, amp, seed, bottom) {
+  // 只留远山以上的天空（日落时太阳要沉到山后面）
+  function skyClip(ctx) {
+    ctx.beginPath();
+    ctx.rect(BACK.x0, BACK.y0, BACK.x1 - BACK.x0, BACK.y1 - BACK.y0);
+    ridge(ctx, BACK.x0, BACK.x1, 306, 40, 11, BACK.y1, true);
+    ctx.clip('evenodd');
+  }
+  function ridge(ctx, x0, x1, base, amp, seed, bottom, keepPath) {
     const r = seeded(seed);
     const f = [r() * 0.008 + 0.004, r() * 0.02 + 0.01, r() * 0.04 + 0.02], p = [r() * 9, r() * 9, r() * 9];
-    ctx.beginPath(); ctx.moveTo(x0, bottom);
+    if (!keepPath) ctx.beginPath();
+    ctx.moveTo(x0, bottom);
     for (let x = x0; x <= x1 + 1; x += 6) {
       const y = base - amp * (0.6 * Math.sin(x * f[0] + p[0]) + 0.3 * Math.sin(x * f[1] + p[1]) + 0.1 * Math.sin(x * f[2] + p[2]));
       ctx.lineTo(x, y);
@@ -597,11 +644,11 @@
     drawRipples(ctx, t, season);
     // 站立贴纸：接地阴影 + 本体
     for (const st of L.ground) {
-      if (!st.tw && !st.dying && variantOf(st, season) === '') {
-        const b = bakeOf(st, season), k = kOf(st) * popScale(st, t);
+      if ((!st.tw || st.tw.walk) && !st.dying && variantOf(st, season) === '') {
+        const p = posOf(st, t), b = bakeOf(st, season), k = depthK(p.y) * st.s * popScale(st, t);
         const rw = Math.min(b.box.w * 0.36, 70) * k;
         ctx.fillStyle = 'rgba(50,35,20,0.16)';
-        ctx.beginPath(); ctx.ellipse(st.x + 3 * k, st.y + 1.5 * k, rw, rw * 0.2, 0, 0, TAU); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(p.x + 3 * k, p.y + 1.5 * k, rw, rw * 0.2, 0, 0, TAU); ctx.fill();
       }
       drawSticker(ctx, st, t, season);
     }
@@ -642,7 +689,7 @@
         if (!DEFS[st.id].emissive) continue;
         const lv = lightLevel(st.id, time); if (!lv) continue;
         if (DEFS[st.id].zone === 'celestial') {
-          ctx.save(); ctx.beginPath(); ctx.rect(BACK.x0, BACK.y0, BACK.x1 - BACK.x0, BACK.y1 - BACK.y0); ctx.clip();
+          ctx.save(); skyClip(ctx);
           drawSticker(ctx, st, t, season, { alpha: 0.85 * lv, noShadow: true }); ctx.restore();
         } else drawSticker(ctx, st, t, season, { alpha: 0.85 * lv, noShadow: true });
       }
@@ -651,8 +698,15 @@
     ctx.globalCompositeOperation = 'lighter';
     for (const st of [...L.cel, ...L.flat, ...L.ground, ...L.air]) {
       if (st.dying) continue;
-      const lv = lightLevel(st.id, time); if (!lv) continue;
+      let lv = lightLevel(st.id, time); if (!lv) continue;
       const b = bakeOf(st, season), X = xformOf(st, t);
+      const cel = DEFS[st.id].zone === 'celestial';
+      // 后墙上的太阳 / 月亮沉到山后面时光晕跟着淡掉，也只亮在后墙范围里
+      if (cel) {
+        lv *= clamp((BACK.y1 - 40 - X.y) / 90, 0, 1);
+        if (lv <= 0.01) continue;
+        ctx.save(); ctx.beginPath(); ctx.rect(BACK.x0, BACK.y0, BACK.x1 - BACK.x0, BACK.y1 - BACK.y0); ctx.clip();
+      }
       for (const Lt of b.lights) {
         const x = X.x + Lt.x * X.kx, y = X.y + Lt.y * X.ky, r = Lt.r * X.k * 2.3;
         const flick = 0.92 + 0.08 * Math.sin(t * 7 + st.uid + Lt.x);
@@ -660,6 +714,7 @@
         g.addColorStop(0, hexA(Lt.color, 0.75 * lv * flick)); g.addColorStop(0.35, hexA(Lt.color, 0.3 * lv * flick)); g.addColorStop(1, hexA(Lt.color, 0));
         ctx.fillStyle = g; ctx.fillRect(x - r, y - r, r * 2, r * 2);
       }
+      if (cel) ctx.restore();
       if (DEFS[st.id].pool && time === 'night') { // 路灯在地上的光斑
         const r = 70 * X.k;
         ctx.save(); ctx.translate(X.x, st.y); ctx.scale(1, 0.28);
@@ -865,7 +920,7 @@
   Object.assign(PB, {
     W, H, OPEN, BACK, FY0, FY1, clamp, lerp, depthK, floorX, floorT, DEFS, TABS, nameOf, ensureArt,
     setDepth, getDepth: () => depth, DEPTH_MIN, DEPTH_MAX, DEPTH_DEFAULT,
-    scene, now, mkItem, windy, live, all, kOf, pondAt, variantOf, bakeOf, xformOf, drawSticker, hitTest, boxOf,
+    scene, now, mkItem, windy, twPose, posOf, live, all, kOf, pondAt, variantOf, bakeOf, xformOf, drawSticker, hitTest, boxOf,
     layersOf, pickOrder, constrain, inZone, render, updateParts, parts, ripples, sparkle, dust, addPart, rnd,
     lightLevel, easeOutBack, seeded,
   });
