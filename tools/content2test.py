@@ -1,7 +1,7 @@
 """第二批贴纸（稻草人、南瓜、刺猬、蜗牛、风车、绵羊）的反应测试：python tools/content2test.py"""
 import pathlib, json
 from playwright.sync_api import sync_playwright
-root = pathlib.Path(r'C:\vibe-coding\sticker-diorama')
+root = pathlib.Path(__file__).resolve().parent.parent
 with sync_playwright() as p:
     b = p.chromium.launch(headless=True, args=["--use-gl=angle","--use-angle=d3d11"])
     pg = b.new_page(viewport={"width":1440,"height":900})
