@@ -161,7 +161,7 @@
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const cw = Math.round(canvas.clientWidth * dpr) || canvas.width, ch = Math.round(canvas.clientHeight * dpr) || canvas.height;
     canvas.width = cw; canvas.height = ch;
-    const b = ART.bake(id, Object.assign({ season: scene.season }, v || {}));
+    const b = ART.bake(id === 'windmill' ? 'windmill_full' : id, Object.assign({ season: scene.season }, v || {}));
     const k = canvas.getContext('2d');
     const sc = Math.min((cw - 6) / b.w, (ch - 6) / b.h), w = b.w * sc, h = b.h * sc, x = (cw - w) / 2, y = (ch - h) / 2;
     k.clearRect(0, 0, cw, ch);
@@ -494,6 +494,11 @@
     ['ducklings', 'pond', () => true], ['frog', 'pond', () => scene.season === 'summer', p => !p.flags.lotus],
     ['bridge', 'pond', () => true], ['boat', 'pond', () => true],
     ['moon', 'bench', () => scene.time === 'night'],
+    ['scarecrow', 'bird', () => true], ['scarecrow', 'grass', () => scene.season === 'autumn', c => !c.flags.harvest],
+    ['scarecrow', 'flowers', () => scene.season === 'autumn', c => !c.flags.harvest],
+    ['raincloud', 'flowers', () => scene.season !== 'winter', f => !f.flags.snail],
+    ['sheep', 'fence', () => true], ['cloud', 'windmill', () => true], ['raincloud', 'windmill', () => true],
+    ['mushroom', 'tree', () => scene.season === 'autumn'],
   ];
   function partnersOf(id) {
     const out = [];
@@ -595,7 +600,7 @@
     toast(d); updateCounts();
     if (d.unlock) { buildTabs(); if (DEFS[d.unlock].tab === tab) buildShelf(); }
     if (Object.keys(save.disc).length === PB.DISC.length) {
-      setTimeout(() => { showTip('24 种反应全部找到了！这个纸盒已经没有秘密了。', true); PB.sfx('fanfare'); for (let i = 0; i < 5; i++) setTimeout(() => PB.sparkle(rnd(200, 1080), rnd(120, 500), 20, 1.5), i * 200); }, 1200);
+      setTimeout(() => { showTip(`${PB.DISC.length} 种反应全部找到了！这个纸盒已经没有秘密了。`, true); PB.sfx('fanfare'); for (let i = 0; i < 5; i++) setTimeout(() => PB.sparkle(rnd(200, 1080), rnd(120, 500), 20, 1.5), i * 200); }, 1200);
     }
     saveSoon();
   };

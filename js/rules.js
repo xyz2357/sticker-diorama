@@ -67,6 +67,14 @@
     { id: 'liuxing', name: '许愿', icon: 'star', unlock: 'star', hint: '夜晚 · 月亮 + 长椅', desc: '坐在长椅上看月亮，一颗流星划了过去。' },
     { id: 'xiaoqiao', name: '小桥流水', icon: 'bridge', unlock: 'boat', hint: '小木桥 + 池塘', desc: '池塘上架起一座桥，可以划船了。' },
     { id: 'fanzhou', name: '泛舟', icon: 'boat', hint: '小船 + 池塘', desc: '小船在水面上轻轻摇。' },
+    { id: 'yangjuan', name: '羊圈', icon: 'sheep', hint: '绵羊 + 篱笆', desc: '绵羊找到了篱笆，安心地在里面吃草。' },
+    { id: 'yangmao', name: '红围巾', icon: 'sheep', iconV: { season: 'winter' }, hint: '冬天 · 绵羊', desc: '冬天到了，绵羊围上了红围巾。' },
+    { id: 'qifeng', name: '起风了', icon: 'windmill', hint: '风车 + 云', desc: '云飘过来，风车呼呼地转起来。' },
+    { id: 'daocaoren', name: '稻草人', icon: 'scarecrow', unlock: 'birdfly', hint: '稻草人 + 小鸟', desc: '小鸟被稻草人吓了一跳，飞走了。' },
+    { id: 'qiushou', name: '秋收', icon: 'pumpkin', unlock: 'pumpkin', hint: '秋天 · 稻草人 + 草丛', desc: '稻草人守着的地里结出了南瓜。' },
+    { id: 'nanguadeng', name: '南瓜灯', icon: 'pumpkin', hint: '夜晚 · 南瓜', desc: '天黑了，南瓜的笑脸亮了起来。' },
+    { id: 'ciwei', name: '刺猬', icon: 'hedgehog', unlock: 'hedgehog', hint: '秋天 · 蘑菇 + 大树', desc: '闻到蘑菇的香味，一只刺猬钻了出来。' },
+    { id: 'woniu', name: '蜗牛', icon: 'snail', unlock: 'snail', hint: '雨云 + 花丛', desc: '下雨了，花丛里爬出一只蜗牛。' },
   ];
   const DMAP = Object.fromEntries(DISC.map(d => [d.id, d]));
 
@@ -193,6 +201,69 @@
         });
       }
     },
+    // 稻草人吓跑小鸟
+    () => {
+      for (const c of all('scarecrow')) for (const b of all('bird')) {
+        if (!idle(b) || !idle(c) || !near(c, b, 125)) continue;
+        b.busy = 1;
+        later(0.35, () => {
+          if (!scene.items.includes(b)) return;
+          const k = kOf(b), dir = b.x >= c.x ? 1 : -1;
+          const x0 = b.x, y0 = b.y - 16 * k;
+          b.id = 'birdfly'; b.s = Math.max(0.7, k); b.flip = dir < 0; b.busy = 0;
+          b.x = x0; b.y = y0;
+          const [x1, y1] = constrain('birdfly', x0 + dir * 140, Math.max(PB.OPEN.y0 + 70, y0 - 260));
+          PB.sfx('chirp');
+          flyTo(b, x0, y0, x1, y1, 0.9, 0);
+          discover('daocaoren', [x0, y0]);
+        });
+      }
+    },
+    // 秋收：秋天 稻草人旁边有草丛 → 南瓜
+    () => {
+      if (scene.season !== 'autumn') return;
+      for (const c of all('scarecrow')) {
+        if (c.flags.harvest || !idle(c)) continue;
+        const g = [...all('grass'), ...all('flowers')].find(x => idle(x) && near(c, x, 170));
+        if (!g) continue;
+        c.flags.harvest = 1;
+        later(1.1, () => {
+          if (!scene.items.includes(c)) return;
+          const k = kOf(c), side = g.x < c.x ? 1 : -1;
+          const pk = spawn('pumpkin', c.x + side * 60 * k, c.y + 12 * k);
+          discover('qiushou', [pk.x, pk.y - 20]);
+        });
+      }
+    },
+    // 刺猬：秋天 蘑菇在大树旁边
+    () => {
+      if (scene.season !== 'autumn') return;
+      for (const m of all('mushroom')) {
+        if (m.flags.hog || !idle(m)) continue;
+        if (!all('tree').some(t => near(m, t, 140))) continue;
+        m.flags.hog = 1;
+        later(1.6, () => {
+          if (!scene.items.includes(m)) return;
+          const k = kOf(m), side = Math.random() < 0.5 ? -1 : 1;
+          const h = spawn('hedgehog', m.x + side * 55 * k, m.y + 18 * k, { from: [m.x + side * 140 * k, m.y + 30 * k], arc: 0, dur: 0.9, flip: side > 0 });
+          discover('ciwei', [h.x, h.y - 20]);
+        });
+      }
+    },
+    // 蜗牛：雨云 + 花丛（不是冬天）
+    () => {
+      if (scene.season === 'winter') return;
+      for (const c of all('raincloud')) for (const f of all('flowers')) {
+        if (f.flags.snail || !idle(c) || !idle(f) || !above(c, f)) continue;
+        f.flags.snail = 1;
+        later(1.2, () => {
+          if (!scene.items.includes(f)) return;
+          const k = kOf(f);
+          const sn = spawn('snail', f.x + 45 * k, f.y + 10 * k);
+          discover('woniu', [sn.x, sn.y - 16]);
+        });
+      }
+    },
     // 午睡：猫 + 长椅
     () => {
       for (const c of all('cat')) for (const b of all('bench')) {
@@ -269,6 +340,10 @@
     ['liuxing', () => scene.time === 'night' && firstOf('bench') && firstOf('moon')],
     ['xiaoqiao', () => bridgeOverPond()],
     ['fanzhou', () => scene.season !== 'winter' && all('boat').find(b => idle(b) && pondAt(b.x, b.y))],
+    ['yangjuan', () => all('sheep').find(s => idle(s) && all('fence').some(f => near(s, f, 130)))],
+    ['yangmao', () => scene.season === 'winter' && firstOf('sheep')],
+    ['qifeng', () => all('windmill').find(w => idle(w) && PB.windy(w))],
+    ['nanguadeng', () => scene.time === 'night' && firstOf('pumpkin')],
   ];
   PB.meteorOn = () => scene.time === 'night' && all('bench').length > 0 && all('moon').length > 0;
 
@@ -348,6 +423,21 @@
       id: 'village', title: '水边小镇', client: 'boat', text: '想住在有池塘和小桥的小镇上。',
       req: [has('house', 3), has('pond', 1), has('bridge', 1)],
       bonus: [{ t: '小船在水上', h: '架好小桥就能解锁小船', f: () => all('boat').some(b => pondAt(b.x, b.y)) }, { t: '天黑后亮着两盏路灯', f: () => scene.time !== 'day' && cnt('lantern') >= 2 }],
+    },
+    {
+      id: 'harvest', title: '秋收', client: 'scarecrow', text: '秋天到了，想看看地里结满南瓜。',
+      req: [isS('autumn'), has('scarecrow', 1), { t: '南瓜', n: 2, h: '秋天把稻草人放在草丛旁边', f: () => cnt('pumpkin') }],
+      bonus: [{ t: '刺猬', h: '秋天让雨下在大树上，等蘑菇长出来', f: () => cnt('hedgehog') > 0 }, has('windmill', 1)],
+    },
+    {
+      id: 'ranch', title: '牧场', client: 'sheep', text: '想要一片围起来的草地，羊多一点。',
+      req: [has('sheep', 3), has('fence', 3)],
+      bonus: [{ t: '风车转得飞快', h: '把白云挂到风车附近', f: () => all('windmill').some(w => PB.windy(w)) }, has('house', 1)],
+    },
+    {
+      id: 'rainy', title: '雨天', client: 'snail', text: '最喜欢下雨天了，大家都出来玩。',
+      req: [has('raincloud', 1), { t: '蜗牛', h: '让雨下在花丛上', f: () => cnt('snail') > 0 }, { t: '青蛙', h: '让雨落进池塘', f: () => cnt('frog') > 0 }],
+      bonus: [{ t: '彩虹', h: '雨云挨着太阳', f: () => cnt('rainbow') > 0 }, { t: '鸭子在水里游', f: () => swimmers() > 0 }],
     },
   ];
   const JMAP = Object.fromEntries(JOBS.map(j => [j.id, j]));

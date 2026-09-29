@@ -111,6 +111,15 @@
     },
     cricket(t) { for (let i = 0; i < 3; i++) osc('sine', 4200, 4300, t + i * 0.06, 0.03, 0.03); },
     boing(t) { osc('sine', 220, 520, t, 0.18, 0.2); },
+    baa(t) {
+      const o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter(), lfo = ctx.createOscillator(), lg = ctx.createGain();
+      o.type = 'sawtooth'; o.frequency.setValueAtTime(330, t); o.frequency.linearRampToValueAtTime(300, t + 0.55);
+      lfo.frequency.value = 9; lg.gain.value = 18; lfo.connect(lg); lg.connect(o.frequency);
+      f.type = 'bandpass'; f.frequency.value = 1100; f.Q.value = 1.6;
+      env(g, t, 0.05, 0.16, 0.35, 0.2);
+      o.connect(f); f.connect(g); g.connect(master);
+      o.start(t); o.stop(t + 0.7); lfo.start(t); lfo.stop(t + 0.7);
+    },
   };
 
   PB.sfx = function (name, delay = 0) {

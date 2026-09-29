@@ -51,6 +51,12 @@
     moon: { name: '月亮', tab: 'sky', zone: 'celestial', base: 1, anim: 'float', light: { dusk: 0.5, night: 1 }, emissive: 1 },
     rainbow: { name: '彩虹', tab: 'sky', zone: 'celestial', zo: -1 },
     star: { name: '星星', tab: 'sky', zone: 'celestial', anim: 'twinkle', light: { dusk: 0.4, night: 1 }, emissive: 1 },
+    sheep: { name: '绵羊', tab: 'animal', zone: 'ground', base: 1, animal: 1, voice: 'baa' },
+    windmill: { name: '风车', tab: 'build', zone: 'ground', base: 1, light: { dusk: 0.5, night: 1 } },
+    scarecrow: { name: '稻草人', tab: 'build', zone: 'ground', base: 1, anim: 'sway' },
+    pumpkin: { name: '南瓜', tab: 'nature', zone: 'ground', plant: 1, light: { dusk: 0.5, night: 1 } },
+    hedgehog: { name: '刺猬', tab: 'animal', zone: 'ground', animal: 1, anim: 'hop' },
+    snail: { name: '蜗牛', tab: 'animal', zone: 'ground', animal: 1 },
   };
   const TABS = [
     { id: 'nature', name: '自然' }, { id: 'build', name: '小物' },
@@ -200,6 +206,23 @@
     }
     ctx.globalAlpha = alpha;
     ctx.drawImage(b.img, -b.ax / S, -b.ay / S, b.w / S, b.h / S);
+    // 风车：叶片是另一张贴纸，绕轮轴转；附近有云就转得快
+    if (st.id === 'windmill' && !opt.noBlades) {
+      const hub = b.emitters.find(e => e.type === 'hub');
+      if (hub) {
+        const bb = ART.bake('windmill_blades', { season });
+        const ang = st === PB.dragItem ? 0 : windmillAngle(st, t);
+        ctx.save();
+        ctx.translate(hub.x, hub.y); ctx.rotate(ang);
+        if (!opt.noShadow) {
+          ctx.globalAlpha = alpha * 0.18;
+          ctx.drawImage(bb.shadow, -(bb.ax + bb.shadowPad) / S + 3, -(bb.ay + bb.shadowPad) / S + 4, bb.shadow.width / S, bb.shadow.height / S);
+        }
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(bb.img, -bb.ax / S, -bb.ay / S, bb.w / S, bb.h / S);
+        ctx.restore();
+      }
+    }
     if (lift > 0.01) {
       // 抬起时左上角一点反光，像塑料贴纸翘起来
       ctx.globalAlpha = alpha * lift * 0.18;
@@ -210,6 +233,19 @@
       ctx.globalCompositeOperation = 'source-over';
     }
     ctx.restore();
+  }
+
+  // 风车转角：按时间积分，风大时加速（不回跳）
+  function windy(st) {
+    return scene.items.some(c => (c.id === 'cloud' || c.id === 'raincloud') && !c.dying && Math.abs(c.x - st.x) < 280 && c.y < st.y);
+  }
+  function windmillAngle(st, t) {
+    const w = st._wind || (st._wind = { a: st.uid, t, v: 0.7 });
+    const target = windy(st) ? 4.2 : 0.7;
+    const dt = Math.min(0.1, Math.max(0, t - w.t));
+    w.v += (target - w.v) * Math.min(1, dt * 1.5);
+    w.a += w.v * dt; w.t = t;
+    return w.a;
   }
 
   function hitTest(st, wx, wy, t) {
@@ -789,7 +825,7 @@
 
   Object.assign(PB, {
     W, H, OPEN, BACK, FY0, FY1, clamp, lerp, depthK, floorX, floorT, DEFS, TABS, nameOf, ensureArt,
-    scene, now, mkItem, live, all, kOf, pondAt, variantOf, bakeOf, xformOf, drawSticker, hitTest, boxOf,
+    scene, now, mkItem, windy, live, all, kOf, pondAt, variantOf, bakeOf, xformOf, drawSticker, hitTest, boxOf,
     layersOf, pickOrder, constrain, inZone, render, updateParts, parts, ripples, sparkle, dust, addPart, rnd,
     lightLevel, easeOutBack, seeded,
   });
