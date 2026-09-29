@@ -7,20 +7,35 @@
   // ---------- 几何 ----------
   // 世界坐标 1280×760。盒口（前沿内侧）+ 后墙 + 地面梯形，地面越靠前贴纸越大。
   const W = 1280, H = 760;
-  // 后墙宽度 / 盒口宽度：越小盒子越深。贴纸的纵深缩放由它推出来，两者始终一致
-  const BACK_RATIO = 0.62;
+  // 景深 = 后墙宽度 / 盒口宽度：越小盒子越深（玩家可以在滑块上调）。贴纸的纵深缩放由它推出来，两者始终一致
+  const DEPTH_MIN = 0.5, DEPTH_MAX = 0.9, DEPTH_DEFAULT = 0.7;
   const K_FRONT = 1.35;             // 贴在最前沿时的缩放
   const OPEN = { x0: 40, y0: 40, x1: 1240, y1: 740 };
-  const BW = (OPEN.x1 - OPEN.x0) * BACK_RATIO, CX = (OPEN.x0 + OPEN.x1) / 2;
-  const BACK = { x0: Math.round(CX - BW / 2), y0: 88, x1: Math.round(CX + BW / 2), y1: 388 };
+  const CX = (OPEN.x0 + OPEN.x1) / 2;
+  const BACK = { x0: 0, y0: 88, x1: 0, y1: 388 };   // x0 / x1 随景深变（原地改，别处拿到的引用一直有效）
   const FY0 = BACK.y1, FY1 = OPEN.y1;
   const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
   const lerp = (a, b, t) => a + (b - a) * t;
   const floorT = y => clamp((y - FY0) / (FY1 - FY0), 0, 1);
   // 地面两条侧边的交点就是消失点；站在地上的东西，大小和它离消失点的距离成正比
-  const VY = FY1 - (FY1 - FY0) / (1 - BACK_RATIO);
+  let depth = DEPTH_DEFAULT, VY = 0;
   const depthK = y => K_FRONT * (clamp(y, FY0, FY1) - VY) / (FY1 - VY);
   const floorX = y => { const t = floorT(y); return [lerp(BACK.x0, OPEN.x0, t), lerp(BACK.x1, OPEN.x1, t)]; };
+  const FLOOR_PTS = [], LWALL = [], RWALL = [], CEIL = [], STARS = [];
+  function applyDepth(r) {
+    depth = clamp(r, DEPTH_MIN, DEPTH_MAX);
+    const bw = (OPEN.x1 - OPEN.x0) * depth;
+    BACK.x0 = Math.round(CX - bw / 2); BACK.x1 = Math.round(CX + bw / 2);
+    VY = FY1 - (FY1 - FY0) / (1 - depth);
+    FLOOR_PTS.splice(0, 8, BACK.x0, BACK.y1, BACK.x1, BACK.y1, OPEN.x1, OPEN.y1, OPEN.x0, OPEN.y1);
+    LWALL.splice(0, 8, OPEN.x0, OPEN.y0, BACK.x0, BACK.y0, BACK.x0, BACK.y1, OPEN.x0, OPEN.y1);
+    RWALL.splice(0, 8, OPEN.x1, OPEN.y0, BACK.x1, BACK.y0, BACK.x1, BACK.y1, OPEN.x1, OPEN.y1);
+    CEIL.splice(0, 8, OPEN.x0, OPEN.y0, OPEN.x1, OPEN.y0, BACK.x1, BACK.y0, BACK.x0, BACK.y0);
+    const rr = seeded(77);
+    STARS.length = 0;
+    for (let i = 0; i < 70; i++) STARS.push({ x: lerp(BACK.x0 + 8, BACK.x1 - 8, rr()), y: lerp(BACK.y0 + 8, 290, Math.pow(rr(), 1.3)), s: 0.6 + rr() * 1.4, p: rr() * 9 });
+  }
+  applyDepth(DEPTH_DEFAULT);
 
   // ---------- 贴纸定义 ----------
   // zone: ground 站在地上（原点=接地点，按纵深缩放）| flat 贴地（池塘）| air 挂在盒子里 | celestial 画在后墙上
@@ -361,10 +376,6 @@
   function seeded(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
 
   function pathPoly(ctx, pts) { ctx.beginPath(); ctx.moveTo(pts[0], pts[1]); for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]); ctx.closePath(); }
-  const FLOOR_PTS = [BACK.x0, BACK.y1, BACK.x1, BACK.y1, OPEN.x1, OPEN.y1, OPEN.x0, OPEN.y1];
-  const LWALL = [OPEN.x0, OPEN.y0, BACK.x0, BACK.y0, BACK.x0, BACK.y1, OPEN.x0, OPEN.y1];
-  const RWALL = [OPEN.x1, OPEN.y0, BACK.x1, BACK.y0, BACK.x1, BACK.y1, OPEN.x1, OPEN.y1];
-  const CEIL = [OPEN.x0, OPEN.y0, OPEN.x1, OPEN.y0, BACK.x1, BACK.y0, BACK.x0, BACK.y0];
 
   function ridge(ctx, x0, x1, base, amp, seed, bottom) {
     const r = seeded(seed);
@@ -530,7 +541,7 @@
   // ---------- 缓存背景 ----------
   const bg = { key: '', sky: null, mid: null, frame: null };
   function ensureBg(px, season, time) {
-    const key = `${px}|${season}|${time}|${PB.fontReady ? 1 : 0}`;
+    const key = `${px}|${season}|${time}|${depth}|${PB.fontReady ? 1 : 0}`;
     if (bg.key === key) return bg;
     const mk = () => { const c = document.createElement('canvas'); c.width = Math.round(W * px); c.height = Math.round(H * px); const k = c.getContext('2d'); k.setTransform(px, 0, 0, px, 0, 0); return [c, k]; };
     const [a, ak] = mk(); paintSky(ak, season, time);
@@ -541,7 +552,29 @@
   }
 
   // 夜空的星星（画在后墙上）
-  const STARS = (() => { const r = seeded(77), a = []; for (let i = 0; i < 70; i++) a.push({ x: lerp(BACK.x0 + 8, BACK.x1 - 8, r()), y: lerp(BACK.y0 + 8, 290, Math.pow(r(), 1.3)), s: 0.6 + r() * 1.4, p: r() * 9 }); return a; })();
+  /**
+   * 改景深。贴纸按"在地面上左右的相对位置"跟着挪（后墙上的按在后墙里的相对位置），
+   * 所以来回拖滑块不会越挪越偏。
+   */
+  function setDepth(r) {
+    r = clamp(r, DEPTH_MIN, DEPTH_MAX);
+    if (Math.abs(r - depth) < 1e-4) return;
+    const rel = scene.items.map(st => {
+      const z = DEFS[st.id].zone;
+      if (z === 'ground' || z === 'flat') { const [a, b] = floorX(st.y); return (st.x - a) / (b - a); }
+      if (z === 'celestial') return (st.x - BACK.x0) / (BACK.x1 - BACK.x0);
+      return null;
+    });
+    applyDepth(r);
+    scene.items.forEach((st, i) => {
+      const u = rel[i];
+      if (u === null) return;
+      const z = DEFS[st.id].zone;
+      if (z === 'celestial') st.x = lerp(BACK.x0, BACK.x1, u);
+      else { const [a, b] = floorX(st.y); st.x = lerp(a, b, u); }
+      st.tw = null;
+    });
+  }
 
   // ---------- 主渲染 ----------
   function render(ctx, px, t, opt = {}) {
@@ -831,6 +864,7 @@
 
   Object.assign(PB, {
     W, H, OPEN, BACK, FY0, FY1, clamp, lerp, depthK, floorX, floorT, DEFS, TABS, nameOf, ensureArt,
+    setDepth, getDepth: () => depth, DEPTH_MIN, DEPTH_MAX, DEPTH_DEFAULT,
     scene, now, mkItem, windy, live, all, kOf, pondAt, variantOf, bakeOf, xformOf, drawSticker, hitTest, boxOf,
     layersOf, pickOrder, constrain, inZone, render, updateParts, parts, ripples, sparkle, dust, addPart, rnd,
     lightLevel, easeOutBack, seeded,

@@ -56,7 +56,7 @@
   function resize() {
     const wrap = $('#stageWrap').getBoundingClientRect();
     const narrow = window.innerWidth <= 980;
-    const w = wrap.width, h = narrow ? w * H / W : wrap.height - 40;
+    const w = wrap.width, h = narrow ? w * H / W : wrap.height - 52;
     const s = Math.max(0.2, Math.min(w / W, h / H));
     cssW = Math.floor(W * s); cssH = Math.floor(H * s);
     const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -819,7 +819,20 @@
     requestAnimationFrame(frame);
   }
 
+  // ---------- 景深滑块 ----------
+  const depthInput = $('#depth');
+  function syncDepth() { depthInput.value = Math.round(PB.getDepth() * 100); }
+  depthInput.addEventListener('input', () => {
+    PB.setDepth(depthInput.value / 100);
+    save.depth = PB.getDepth();
+    saveSoon();
+  });
+  depthInput.addEventListener('change', () => PB.sfx('tick'));
+  depthInput.addEventListener('pointerdown', e => e.stopPropagation());
+
   function boot() {
+    // 先定景深，再读档（读档时按当前盒子形状约束贴纸位置）
+    PB.setDepth(save.depth || PB.DEPTH_DEFAULT); syncDepth();
     if (save.scene && save.scene.items) deserialize(save.scene); else starter();
     buildSegs(); buildTabs(); resize(); buildShelf(); updateCounts(); syncMute(); renderJob();
     showTip(TIPS[0]); tipI = 1;

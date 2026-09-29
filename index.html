@@ -86,6 +86,12 @@
     opacity: .92; transition: opacity .4s;
   }
   #tip .bulb { width: 20px; height: 20px; flex: none; }
+  #underStage { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; margin-top: 12px; }
+  #underStage #tip { margin-top: 0; flex: 1; min-width: 0; }
+  .depth { display: flex; align-items: center; gap: 6px; color: #eaf1ee; font: 15px var(--display); flex: none; background: rgba(0,0,0,.16); border-radius: 999px; padding: 4px 12px 4px 14px; }
+  .depth .dl { margin-right: 4px; }
+  .depth .end { font-size: 12px; opacity: .75; }
+  .depth input { width: 130px; accent-color: #ffd56b; cursor: pointer; }
 
   #selBar {
     position: absolute; display: none; transform: translate(-50%, -100%);
@@ -289,6 +295,9 @@
     .chip b { font-size: 11px; padding: 1px 4px; }
     .chip .lbl { display: none; }
     #tip { font-size: 13px; }
+    #underStage { flex-direction: column; align-items: stretch; gap: 8px; }
+    .depth { justify-content: center; }
+    .depth input { flex: 1; width: auto; }
   }
 </style>
 </head>
@@ -321,7 +330,14 @@
       </div>
       <div id="toasts"></div>
     </div>
+    <div id="underStage">
     <div id="tip"><svg class="bulb" viewBox="0 0 24 24" fill="none" stroke="#ffd56b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg><span id="tipText"></span></div>
+    <label class="depth" title="盒子的景深：往左更深，往右更浅">
+      <span class="dl">景深</span><span class="end">深</span>
+      <input type="range" id="depth" min="50" max="90" step="1">
+      <span class="end">浅</span>
+    </label>
+    </div>
   </div>
 
   <aside id="side">
