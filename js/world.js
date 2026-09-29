@@ -3,6 +3,10 @@
   'use strict';
   const PB = window.PB = window.PB || {};
   const TAU = Math.PI * 2;
+  // 舞台感开关（设置里可以关）；ui.js 读档后会覆盖
+  PB.opt = PB.opt || { paper: true, entrance: true, curtain: true, spot: true, rods: true };
+  const PAPER_FPS = 12;             // 纸片动作下，整个画面每秒换几格
+  const IDLE_FPS = 6;               // 平时的小动作每秒几格
 
   // ---------- 几何 ----------
   // 世界坐标 1280×760。盒口（前沿内侧）+ 后墙 + 地面梯形，地面越靠前贴纸越大。
@@ -16,6 +20,7 @@
   const FY0 = BACK.y1, FY1 = OPEN.y1;
   const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
   const lerp = (a, b, t) => a + (b - a) * t;
+  const hash = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
   const floorT = y => clamp((y - FY0) / (FY1 - FY0), 0, 1);
   // 地面两条侧边的交点就是消失点；站在地上的东西，大小和它离消失点的距离成正比
   let depth = DEPTH_DEFAULT, VY = 0;
@@ -148,28 +153,75 @@
 
   function popScale(st, t) {
     if (!st.pop) return 1;
-    const P = st.pop, el = t - P.t0;
+    const P = st.pop, el = t - P.t0, paper = PB.opt.paper;
+    const q = e => paper ? Math.floor(e * 10) / 10 : e;
     if (P.type === 'stick') {
       const e = el / 0.38; if (e >= 1) { st.pop = null; return 1; }
-      return 1 + 0.1 * Math.sin(e * Math.PI * 2.4) * (1 - e);
+      return paper ? 1 : 1 + 0.1 * Math.sin(e * Math.PI * 2.4) * (1 - e);
     }
     if (P.type === 'spawn') {
       const e = el / 0.5; if (e >= 1) { st.pop = null; return 1; }
-      return Math.max(0.01, easeOutBack(e));
+      return Math.max(0.01, easeOutBack(q(e)));
     }
     if (P.type === 'grow') {
       const e = el / 1.0; if (e >= 1) { st.pop = null; return 1; }
-      return 0.3 + 0.7 * easeOutElastic(e);
+      return 0.3 + 0.7 * easeOutElastic(q(e));
     }
     return 1;
+  }
+  // 纸片模式：贴上去时不压扁，而是像被手按了一下，歪几格再停稳
+  function popRot(st, t) {
+    if (!PB.opt.paper || !st.pop || st.pop.type !== 'stick') return 0;
+    const step = Math.floor((t - st.pop.t0) * 12);
+    return [0.07, -0.045, 0.02, 0, 0][Math.min(step, 4)] * (st.uid % 2 ? 1 : -1);
+  }
+  // 翻卡片：转到侧面（宽度为 0）时换成另一面
+  function cardScale(st, t) {
+    if (!st.card) return 1;
+    let e = (t - st.card.t0) / st.card.dur;
+    if (e >= 1) { st.card = null; return 1; }
+    if (PB.opt.paper) e = Math.floor(e * 8) / 8;
+    return Math.max(0.04, Math.abs(Math.cos(e * Math.PI)));
   }
 
   // 返回 {ox, oy, rot, sx, sy}，ox/oy 是本地单位
   function animOf(st, t) {
+    if (st === PB.dragItem) return { ox: 0, oy: 0, rot: 0, sx: 1, sy: 1 };
+    return PB.opt.paper ? animPaper(st, t) : animSmooth(st, t);
+  }
+  // 纸片版：一格一格地动（每张贴纸错开节拍），只平移和转动，不压扁不拉伸
+  function animPaper(st, t) {
+    const d = DEFS[st.id], ph = st.uid * 1.731;
+    const step = Math.floor(t * IDLE_FPS + ph * 3);
+    const ts = (step - ph * 3) / IDLE_FPS;
+    const j = n => hash(step * 1.37 + st.uid * 9.1 + n) - 0.5;
+    const odd = step % 2 === 0;
+    let ox = 0, oy = 0, rot = 0;
+    switch (d.anim) {
+      case 'sway': rot = Math.sin(ts * 1.25 + ph) * 0.02 + j(1) * 0.012; break;
+      case 'float': ox = Math.sin(ts * 0.33 + ph) * 7 + j(1) * 1.6; oy = Math.sin(ts * 0.8 + ph) * 3.5 + j(2) * 1.4; rot = j(3) * 0.03; break;
+      case 'bob': oy = Math.sin(ts * 1.8 + ph) * 1.4; rot = Math.sin(ts * 1.3 + ph) * 0.04 + j(1) * 0.02; break;
+      // 蝴蝶：不压扁翅膀，而是左右晃着一蹦一蹦地飞
+      case 'flap': ox = Math.sin(ts * 0.9 + ph) * 16; oy = Math.sin(ts * 1.7 + ph) * 9 - (odd ? 3 : 0); rot = (odd ? 0.16 : -0.1) + j(1) * 0.05; break;
+      case 'wander': ox = Math.sin(ts * 0.7 + ph) * 20 + j(1) * 2; oy = Math.cos(ts * 1.1 + ph) * 12 + j(2) * 2; rot = j(3) * 0.25; break;
+      case 'glide': oy = Math.sin(ts * 1.2 + ph) * 7 - (odd ? 2 : 0); rot = Math.sin(ts * 0.8 + ph) * 0.05 + j(1) * 0.05; break;
+      case 'pulse': rot = Math.sin(ts * 0.7 + ph) * 0.07 + j(1) * 0.025; break;
+      case 'twinkle': rot = (odd ? 0.1 : -0.08) + j(1) * 0.04; break;
+      case 'hop': { const c = (ts * 0.6 + ph) % 3.2; if (c < 0.34) { oy = -7; rot = -0.08; } break; }
+      case 'hop2': { const c = (ts * 0.45 + ph) % 4.5; if (c < 0.34) { oy = -12; rot = -0.1; } break; }
+    }
+    const v = variantOf(st, scene.season);
+    if (v === 'swim') { oy += Math.sin(ts * 2.1 + ph) * 1.5; rot += Math.sin(ts * 1.5 + ph) * 0.05 + j(4) * 0.02; ox += Math.sin(ts * 0.25 + ph) * 10; }
+    if (v === 'skate') { ox += Math.sin(ts * 0.7 + ph) * 26; rot += Math.cos(ts * 0.7 + ph) * 0.12; }
+    if (st.id === 'boat' && pondAt(st.x, st.y) && scene.season !== 'winter') {
+      oy += Math.sin(ts * 1.6 + ph) * 1.6; rot += Math.sin(ts * 1.2 + ph) * 0.045 + j(5) * 0.02;
+    }
+    return { ox, oy, rot, sx: 1, sy: 1 };
+  }
+  function animSmooth(st, t) {
     const d = DEFS[st.id];
     let ox = 0, oy = 0, rot = 0, sx = 1, sy = 1;
     const ph = st.uid * 1.731;
-    if (st === PB.dragItem) return { ox, oy, rot, sx, sy };
     switch (d.anim) {
       case 'sway': rot = Math.sin(t * 1.25 + ph) * 0.016; break;
       case 'float': ox = Math.sin(t * 0.33 + ph) * 7; oy = Math.sin(t * 0.8 + ph) * 3.5; break;
@@ -195,7 +247,6 @@
   // 像舞台上被人拿着走的纸片：位置不逐帧插值，而是一格一格地跳（每秒 fps 格），
   // 每一格随机歪一点、抖一下；走路的会一跳一跳。贴纸本身不做任何动画。
   const PUPPET_FPS = 10;
-  const hash = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
   // 返回 { x, y（画的位置）, gy（脚下的地面 y，用来算大小和排前后）, rot }
   function twPose(T, t) {
     if (!T.puppet) {
@@ -239,8 +290,8 @@
     const a = st.tw && st.tw.puppet ? { ox: 0, oy: 0, rot: 0, sx: 1, sy: 1 } : animOf(st, t);
     const dir = st.flip ? -1 : 1;
     return {
-      x: x + a.ox * k * dir, y: y + a.oy * k, rot: a.rot * dir + (st.lean || 0) + trot,
-      kx: k * a.sx * dir, ky: k * a.sy, k,
+      x: x + a.ox * k * dir, y: y + a.oy * k, rot: a.rot * dir + (st.lean || 0) + trot + popRot(st, t),
+      kx: k * a.sx * dir * cardScale(st, t), ky: k * a.sy, k,
     };
   }
 
@@ -250,11 +301,13 @@
     let alpha = opt.alpha === undefined ? 1 : opt.alpha;
     let rot = X.rot, y = X.y, kx = X.kx, ky = X.ky;
     if (st.dying) {
-      const e = clamp((t - st.dying.t0) / 0.38, 0, 1);
-      alpha *= 1 - e; rot += e * 0.7 * (st.dying.dir || 1); y -= e * 40; kx *= 1 + e * 0.15; ky *= 1 + e * 0.15;
+      let e = clamp((t - st.dying.t0) / 0.38, 0, 1);
+      if (PB.opt.paper) { e = Math.floor(e * 6) / 6; alpha *= 1 - e; rot += e * 0.5 * (st.dying.dir || 1); y -= e * 46; }
+      else { alpha *= 1 - e; rot += e * 0.7 * (st.dying.dir || 1); y -= e * 40; kx *= 1 + e * 0.15; ky *= 1 + e * 0.15; }
     }
     if (alpha <= 0.01) return;
     ctx.save();
+    if (st.tw && st.tw.clip) applyClip(ctx, st.tw.clip);
     ctx.translate(X.x, y); ctx.rotate(rot); ctx.scale(kx, ky);
     // 投影（世界方向右下），抬起时更远更淡
     const lift = st.lift || 0;
@@ -290,6 +343,42 @@
       ctx.globalCompositeOperation = 'source-atop';
       ctx.fillStyle = g; ctx.fillRect(-b.ax / S, -b.ay / S, b.w / S, b.h / S);
       ctx.globalCompositeOperation = 'source-over';
+    }
+    ctx.restore();
+  }
+
+  // 上场时的遮挡：从侧墙后面走出来、从地板下面升上来
+  function applyClip(ctx, c) {
+    const x0 = c.x0 === undefined ? -1e4 : c.x0, x1 = c.x1 === undefined ? 1e4 : c.x1;
+    const y0 = c.y0 === undefined ? -1e4 : c.y0, y1 = c.y1 === undefined ? 1e4 : c.y1;
+    ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.clip();
+  }
+  // 露出木棍：被"拿着"移动的演员下面伸出一截木棍；吊着的（空中的、从上面放下来的）露一根线
+  function drawRod(ctx, st, t) {
+    const T = st.tw;
+    if (!PB.opt.rods || !T || !T.puppet || T.noRod || st.dying) return;
+    const X = xformOf(st, t), b = bakeOf(st), z = DEFS[st.id].zone;
+    const top = X.y + (b.box.y + 5) * X.ky, bot = X.y + (b.box.y + b.box.h - 5) * X.ky;
+    ctx.save();
+    if (T.clip) applyClip(ctx, T.clip);
+    if (T.string || z === 'air') {
+      const w = Math.abs(b.box.w * X.kx);
+      ctx.strokeStyle = 'rgba(70,55,45,0.7)'; ctx.lineWidth = 1.3;
+      for (const f of w > 90 ? [-0.3, 0.3] : [0]) {
+        const ax = X.x + f * w, ay = top + 4;
+        ctx.beginPath(); ctx.moveTo(ax + Math.sin(X.rot) * 30, OPEN.y0 - 4); ctx.lineTo(ax, ay); ctx.stroke();
+      }
+    } else {
+      const ax = X.x, ay = lerp(bot, top, 0.38), tilt = X.rot * 0.7 + 0.05 * (st.uid % 2 ? 1 : -1);
+      const bx = ax - Math.sin(tilt) * 900, by = ay + Math.cos(tilt) * 900;
+      const wd = 4 + 2 * Math.min(1.3, X.k);
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = '#7d5634'; ctx.lineWidth = wd + 2.4;
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      ctx.strokeStyle = '#d4a263'; ctx.lineWidth = wd;
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,238,205,0.55)'; ctx.lineWidth = wd * 0.3;
+      ctx.beginPath(); ctx.moveTo(ax - wd * 0.2, ay); ctx.lineTo(bx - wd * 0.2, by); ctx.stroke();
     }
     ctx.restore();
   }
@@ -625,6 +714,7 @@
 
   // ---------- 主渲染 ----------
   function render(ctx, px, t, opt = {}) {
+    if (PB.opt.paper) t = Math.floor(t * PAPER_FPS) / PAPER_FPS;
     const season = opt.season || scene.season, time = opt.time || scene.time;
     const B = ensureBg(px, season, time);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -635,24 +725,28 @@
     const L = layersOf(scene.items);
     // 后墙上的天体
     ctx.save(); ctx.beginPath(); ctx.rect(BACK.x0, BACK.y0, BACK.x1 - BACK.x0, BACK.y1 - BACK.y0); ctx.clip();
-    for (const st of L.cel) drawSticker(ctx, st, t, season);
+    for (const st of L.cel) { drawRod(ctx, st, t); drawSticker(ctx, st, t, season); }
     ctx.restore();
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(B.mid, 0, 0); ctx.setTransform(px, 0, 0, px, 0, 0);
 
     ctx.save(); ctx.beginPath(); ctx.rect(OPEN.x0, OPEN.y0, OPEN.x1 - OPEN.x0, OPEN.y1 - OPEN.y0); ctx.clip();
-    for (const st of L.flat) drawSticker(ctx, st, t, season);
+    for (const st of L.flat) { drawRod(ctx, st, t); drawSticker(ctx, st, t, season); }
     drawRipples(ctx, t, season);
     // 站立贴纸：接地阴影 + 本体
     for (const st of L.ground) {
       if ((!st.tw || st.tw.walk) && !st.dying && variantOf(st, season) === '') {
         const p = posOf(st, t), b = bakeOf(st, season), k = depthK(p.y) * st.s * popScale(st, t);
-        const rw = Math.min(b.box.w * 0.36, 70) * k;
+        const rw = Math.min(b.box.w * 0.36, 70) * k * cardScale(st, t);
+        ctx.save();
+        if (st.tw && st.tw.clip) applyClip(ctx, st.tw.clip);
         ctx.fillStyle = 'rgba(50,35,20,0.16)';
         ctx.beginPath(); ctx.ellipse(p.x + 3 * k, p.y + 1.5 * k, rw, rw * 0.2, 0, 0, TAU); ctx.fill();
+        ctx.restore();
       }
+      drawRod(ctx, st, t);
       drawSticker(ctx, st, t, season);
     }
-    for (const st of L.air) drawSticker(ctx, st, t, season);
+    for (const st of L.air) { drawRod(ctx, st, t); drawSticker(ctx, st, t, season); }
     drawParts(ctx, t, 'pre');
 
     // 时段叠色
@@ -664,6 +758,8 @@
       ctx.globalCompositeOperation = 'source-over';
     }
     drawGlow(ctx, t, season, time, L);
+    if (PB.drawSpot) PB.drawSpot(ctx, t);
+    if (PB.drawCurtain) PB.drawCurtain(ctx, t);
     ctx.restore();
 
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(B.frame, 0, 0); ctx.setTransform(px, 0, 0, px, 0, 0);
@@ -742,7 +838,14 @@
     const n = Math.floor(v); emitAcc.set(key, v - n); return n;
   }
 
+  let partAcc = 0;
   function updateParts(dt, t) {
+    if (PB.opt.paper) {
+      partAcc += dt;
+      if (partAcc < 1 / PAPER_FPS) return;
+      dt = Math.min(partAcc, 0.2); partAcc = 0;
+      t = Math.floor(t * PAPER_FPS) / PAPER_FPS;
+    }
     const season = scene.season, time = scene.time;
     const items = live();
     for (const st of items) {
@@ -920,7 +1023,7 @@
   Object.assign(PB, {
     W, H, OPEN, BACK, FY0, FY1, clamp, lerp, depthK, floorX, floorT, DEFS, TABS, nameOf, ensureArt,
     setDepth, getDepth: () => depth, DEPTH_MIN, DEPTH_MAX, DEPTH_DEFAULT,
-    scene, now, mkItem, windy, twPose, posOf, live, all, kOf, pondAt, variantOf, bakeOf, xformOf, drawSticker, hitTest, boxOf,
+    scene, now, mkItem, windy, twPose, posOf, hash, applyClip, live, all, kOf, pondAt, variantOf, bakeOf, xformOf, drawSticker, hitTest, boxOf,
     layersOf, pickOrder, constrain, inZone, render, updateParts, parts, ripples, sparkle, dust, addPart, rnd,
     lightLevel, easeOutBack, seeded,
   });

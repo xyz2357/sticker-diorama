@@ -20,6 +20,9 @@
   if (!save || save.v !== 1) save = freshSave();
   save = Object.assign(freshSave(), save);
   PB.save = save;
+  if (save.opt) Object.assign(PB.opt, save.opt);
+  // 用户"亲手"贴上去的：纸片模式下不放大弹出，只是按一下
+  const popIn = () => PB.opt.paper ? 'stick' : 'spawn';
   let album = [];
   try { album = JSON.parse(localStorage.getItem(AKEY)) || []; } catch (e) { album = []; }
 
@@ -335,7 +338,7 @@
   }
   function quickPlace(id) {
     if (full()) return;
-    const st = mkItem(id, 0, 0, { pop: 'spawn' });
+    const st = mkItem(id, 0, 0, { pop: popIn() });
     const z = DEFS[id].zone;
     if (z === 'ground' || z === 'flat') { st.y = rnd(FY0 + 70, FY1 - 60); const [a, b] = PB.floorX(st.y); st.x = rnd(a + 120, b - 120); }
     else if (z === 'celestial') { st.x = rnd(PB.BACK.x0 + 120, PB.BACK.x1 - 120); st.y = rnd(PB.BACK.y0 + 50, 220); }
@@ -364,7 +367,7 @@
       const k = kOf(st);
       st.state = Object.assign({}, st.state, { cat: false });
       const [wx, wy] = constrain('cat', st.x + 105 * k * (Math.random() < 0.5 ? -1 : 1), st.y + 16 * k);
-      const c = mkItem('cat', wx, wy, { pop: 'spawn', flip: wx < st.x });
+      const c = mkItem('cat', wx, wy, { pop: popIn(), flip: wx < st.x });
       scene.items.push(c);
       const [ex, ey] = [c.x, c.y];
       c.x = st.x; c.y = st.y - 22 * k;
@@ -450,7 +453,7 @@
     pushUndo();
     const k = kOf(st);
     const [x, y] = constrain(st.id, st.x + 46 * k * (st.flip ? -1 : 1), st.y + (DEFS[st.id].zone === 'ground' || DEFS[st.id].zone === 'flat' ? 14 : 20));
-    const c = mkItem(st.id, x, y, { s: st.s, flip: st.flip, pop: 'spawn' });
+    const c = mkItem(st.id, x, y, { s: st.s, flip: st.flip, pop: popIn() });
     scene.items.push(c);
     PB.sfx('peel'); PB.sfx('stick', 0.12);
     select(c); PB.changed('user');
@@ -770,13 +773,35 @@
       <div style="display:flex;gap:10px;justify-content:flex-end"><button class="chip" data-close>算了</button><button class="chip primary" data-a="ok">全部撕掉</button></div>`);
     body.addEventListener('click', e => {
       if (!e.target.closest('[data-a="ok"]')) return;
-      pushUndo(); select(null); PB.clearJobs();
+      pushUndo(); select(null); PB.clearJobs(); closeModal();
+      if (PB.opt.curtain) {
+        PB.curtainTo(0, 0.8); PB.sfx('whoosh');
+        setTimeout(() => {
+          scene.items = []; PB.parts.length = 0; PB.changed('clear');
+          PB.curtainTo(1, 1.3); PB.sfx('whoosh');
+        }, 950);
+        return;
+      }
       scene.items.forEach((st, i) => { st.dying = { t0: now() + i * 0.015, dir: i % 2 ? 1 : -1 }; });
       PB.later(0.7, () => { scene.items = scene.items.filter(s => !s.dying); PB.changed('clear'); });
-      PB.sfx('tear'); closeModal();
+      PB.sfx('tear');
     });
   };
   $('#btnUndo').onclick = undo;
+  function openOpts() {
+    const body = openModal('设置', '舞台感', `<div class="opts">${PB.OPT_DEFS.map(([k, n, d]) => `
+      <label class="opt"><div class="t"><div class="n">${n}</div><div class="d">${d}</div></div>
+        <span class="sw"><input type="checkbox" data-k="${k}" ${PB.opt[k] ? 'checked' : ''}><i></i></span></label>`).join('')}
+      <div class="opts-foot">改了马上生效，会记在这个浏览器里。</div></div>`, 'narrow');
+    body.addEventListener('change', e => {
+      const k = e.target.dataset.k; if (!k) return;
+      PB.opt[k] = e.target.checked;
+      save.opt = Object.assign({}, PB.opt); saveSoon();
+      if (k === 'curtain' && PB.opt.curtain) { PB.curtainSet(0); PB.curtainTo(1, 1.3); PB.sfx('whoosh'); }
+      PB.sfx('tick');
+    });
+  }
+  $('#btnOpt').onclick = openOpts;
   function syncMute() {
     const m = save.muted;
     document.querySelector('#icoSound .w').style.display = m ? 'none' : '';
@@ -849,6 +874,11 @@
     if (matchMedia('(pointer: coarse)').matches) $('#bookHint').textContent = '按住拖进盒子 · 点一下也能贴';
     window.addEventListener('resize', () => { resize(); });
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { PB.fontReady = true; buildShelf(); });
+    // 开场：幕布合着，稍等一下拉开
+    if (PB.opt.curtain) {
+      PB.curtainSet(0);
+      setTimeout(() => PB.curtainTo(1, 1.5), 450);   // 这时还没点过页面，浏览器不让出声
+    }
     requestAnimationFrame(frame);
   }
 
@@ -856,6 +886,9 @@
   window.__TEST__ = {
     place(id, x, y, o = {}) { const st = mkItem(id, x, y, o); scene.items.push(st); PB.changed('test'); return st.uid; },
     setSeason, setTime,
+    opt(k, v) { if (v !== undefined) { PB.opt[k] = v; save.opt = Object.assign({}, PB.opt); } return Object.assign({}, PB.opt); },
+    // 模拟"玩家刚把它贴上去"：有些小戏只认这一下
+    placeLive(id, x, y, o = {}) { const st = mkItem(id, x, y, o); scene.items.push(st); PB.lastPlaced = { st, t: now() }; PB.changed('test'); return st.uid; },
     clear() { scene.items = []; PB.clearJobs(); PB.parts.length = 0; PB.changed('test'); },
     unlockAll() { for (const id in DEFS) save.unlocked[id] = 1; buildShelf(); },
     resetSave() { localStorage.removeItem(KEY); localStorage.removeItem(AKEY); },
