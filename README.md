@@ -40,5 +40,6 @@
 | `tools/shot.py` | 截图：`python tools/shot.py index.html shots/x.png 1440 900` |
 | `tools/play.py` | 脚本化试玩（无头浏览器里的鼠标）：`python tools/play.py basic|combos|flow` |
 | `tools/touchtest.py` | 手机触屏测试（CDP 发真实触摸事件）：滑动、长按拖、轻点 |
+| `tools/build_dist.py` | 把上线要用的文件复制到 `dist/`（Netlify 等静态托管直接部署这个目录；`dist/` 不进 git，改完代码重跑） |
 
 所有贴纸都是代码画的，不依赖图片文件。加一张新贴纸：在 art 文件里 `ART.add(id, (g, v) => {...}, previews)`，再到 `world.js` 的 `DEFS` 登记名字、分类和所在区域。
